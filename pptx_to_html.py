@@ -203,13 +203,14 @@ class PPTXToHTMLConverter:
         
         return style
     
-    def extract_shape_style(self, shape, slide_width, slide_height):
+    def extract_shape_style(self, shape, slide_width, slide_height, shape_index=0):
         """Извлекает стили формы с процентными размерами для адаптивности
         
         Args:
             shape: Фигура для извлечения стилей
             slide_width: Ширина слайда в пикселях
             slide_height: Высота слайда в пикселях
+            shape_index: Индекс фигуры для вычисления z-index (по умолчанию 0)
         
         Note:
             Координаты shape.left и shape.top уже абсолютные относительно слайда,
@@ -227,12 +228,26 @@ class PPTXToHTMLConverter:
         width_percent = (width_px / slide_width) * 100
         height_percent = (height_px / slide_height) * 100
         
+        # Вычисляем z-index на основе порядка обработки фигур
+        # В PowerPoint порядок фигур в slide.shapes определяет z-order:
+        # - Первая фигура (shapes[0]) - самая задняя (z-index минимальный)
+        # - Последняя фигура (shapes[-1]) - самая передняя (z-index максимальный)
+        # 
+        # shape_index соответствует порядку обработки фигур, который совпадает
+        # с порядком в slide.shapes (с учетом рекурсивной обработки групп)
+        #
+        # Используем простую формулу: z-index = shape_index
+        # Это сохраняет оригинальный порядок наложения из PowerPoint
+        
+        z_index = shape_index
+        
         style = {
             'position': 'absolute',
             'left': f"{left_percent:.3f}%",
             'top': f"{top_percent:.3f}%",
             'width': f"{width_percent:.3f}%",
             'height': f"{height_percent:.3f}%",
+            'z-index': str(z_index),
         }
         
         try:
@@ -698,6 +713,7 @@ class PPTXToHTMLConverter:
         
         shapes_data = []
         img_counter = 0
+        shape_counter = 0  # Счетчик для z-index
         
         # Фон слайда
         background = None
@@ -770,7 +786,7 @@ class PPTXToHTMLConverter:
                 Координаты фигур внутри групп в python-pptx уже абсолютные относительно слайда,
                 поэтому нет необходимости добавлять offset группы.
             """
-            nonlocal img_counter
+            nonlocal img_counter, shape_counter
             
             # Пропускаем FREEFORM фигуры, которые использованы как фон слайда
             if shape.shape_type == MSO_SHAPE_TYPE.FREEFORM and background and level == 0:
@@ -804,9 +820,13 @@ class PPTXToHTMLConverter:
                 'content': ''
             }
             
+            # Увеличиваем счетчик фигур для z-index
+            shape_counter += 1
+            current_shape_index = shape_counter
+            
             try:
                 # Координаты shape уже абсолютные, offset не нужен
-                base_style = self.extract_shape_style(shape, slide_width, slide_height)
+                base_style = self.extract_shape_style(shape, slide_width, slide_height, current_shape_index)
             except Exception as e:
                 print(f"  Предупреждение: не удалось извлечь стиль фигуры: {e}")
                 return
@@ -848,6 +868,32 @@ class PPTXToHTMLConverter:
                         shapes_data.append(shape_data)
                 except Exception as e:
                     print(f"  Предупреждение: не удалось сохранить изображение: {e}")
+            
+            # Placeholder'ы (могут содержать стили даже если пустые)
+            elif shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
+                # Проверяем, есть ли текст
+                has_text = hasattr(shape, 'text') and shape.text.strip()
+                
+                # Проверяем, есть ли визуальные стили (фон, границы и т.д.)
+                has_fill = hasattr(shape, 'fill') and shape.fill.type is not None
+                has_line = hasattr(shape, 'line') and hasattr(shape.line, 'color')
+                
+                # Если есть текст
+                if has_text:
+                    shape_data['type'] = 'text'
+                    shape_data['style'] = base_style
+                    if shape.has_text_frame:
+                        shape_data['content'] = self.process_text_frame(shape.text_frame, base_style, slide_width, slide_height)
+                    else:
+                        shape_data['content'] = f'<p>{shape.text}</p>'
+                    shapes_data.append(shape_data)
+                # Если нет текста, но есть стили (фон или граница)
+                elif has_fill or has_line:
+                    shape_data['type'] = 'shape'
+                    shape_data['style'] = base_style
+                    shape_data['content'] = ''
+                    shapes_data.append(shape_data)
+                    print(f"  Обработан пустой placeholder со стилями: {shape.name}")
             
             # Таблицы
             elif shape.shape_type == MSO_SHAPE_TYPE.TABLE:
