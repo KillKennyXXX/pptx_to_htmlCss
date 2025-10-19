@@ -1,15 +1,19 @@
 """
-PPTX to HTML Converter (v16)
+PPTX to HTML Converter (v16.3)
 Конвертирует презентации PowerPoint в веб-страницы с сохранением форматирования
 
 Версия 15: Улучшенная классификация изображений (QR-коды, иконки, логотипы)
 Версия 16: Полное извлечение стилей (градиенты, тени, границы, трансформации)
+Версия 16.1: Исправлена логика границ и теней (удаление ложных границ)
+Версия 16.2: Исправлена прозрачность PNG изображений
+Версия 16.3: Добавлена поддержка композитных QR-кодов из групп фигур
 """
 
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import PP_ALIGN, MSO_VERTICAL_ANCHOR
+from pptx.enum.dml import MSO_FILL_TYPE
 from pptx.dml.color import RGBColor
 import os
 import base64
@@ -747,6 +751,150 @@ class PPTXToHTMLConverter:
         self.current_slide_bg_color = background if background else '#FFFFFF'
         
         # Обработка фигур (включая группы)
+        def is_qr_code_group(group_shape):
+            """Проверяет, является ли группа составным QR-кодом
+            
+            Args:
+                group_shape: Группа для проверки
+            
+            Returns:
+                bool: True если группа содержит маленькие изображения/фигуры, формирующие QR
+            """
+            if group_shape.shape_type != MSO_SHAPE_TYPE.GROUP:
+                return False
+            
+            # Критерии составного QR-кода:
+            # 1. Группа содержит 10+ элементов (обычно QR состоит из множества квадратиков)
+            # 2. Группа имеет небольшой размер (< 150px)
+            # 3. Группа примерно квадратная
+            
+            try:
+                width_px = group_shape.width // 9525
+                height_px = group_shape.height // 9525
+                num_shapes = len(group_shape.shapes)
+                
+                # Проверяем размер
+                if width_px > 150 or height_px > 150:
+                    return False
+                
+                # Проверяем форму (примерно квадрат)
+                ratio = width_px / height_px if height_px > 0 else 0
+                if not (0.7 < ratio < 1.3):
+                    return False
+                
+                # Проверяем количество элементов
+                if num_shapes < 10:
+                    return False
+                
+                # Проверяем, что большинство элементов - это FREEFORM или PICTURE (части QR)
+                freeform_count = sum(1 for s in group_shape.shapes if s.shape_type == MSO_SHAPE_TYPE.FREEFORM)
+                picture_count = sum(1 for s in group_shape.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE)
+                
+                if (freeform_count + picture_count) / num_shapes < 0.8:
+                    return False
+                
+                return True
+            except:
+                return False
+        
+        def process_qr_group_as_image(group_shape):
+            """Обрабатывает группу как составной QR-код
+            
+            Создает единое изображение из группы, объединяя все её части
+            """
+            nonlocal img_counter, shape_counter
+            
+            try:
+                # Увеличиваем счетчики
+                img_counter += 1
+                shape_counter += 1
+                
+                # Получаем границы группы
+                group_width_px = group_shape.width // 9525
+                group_height_px = group_shape.height // 9525
+                group_left_px = group_shape.left // 9525
+                group_top_px = group_shape.top // 9525
+                
+                # Сохраняем информацию о группе как QR-код
+                width_percent = (group_width_px / slide_width) * 100
+                height_percent = (group_height_px / slide_height) * 100
+                left_percent = (group_left_px / slide_width) * 100
+                top_percent = (group_top_px / slide_height) * 100
+                
+                # Собираем информацию о всех частях группы
+                parts = []
+                for sub_shape in group_shape.shapes:
+                    try:
+                        part_data = {
+                            'type': sub_shape.shape_type,
+                            'left': sub_shape.left // 9525,
+                            'top': sub_shape.top // 9525,
+                            'width': sub_shape.width // 9525,
+                            'height': sub_shape.height // 9525,
+                        }
+                        
+                        # Для FREEFORM - сохраняем цвет заливки
+                        if sub_shape.shape_type == MSO_SHAPE_TYPE.FREEFORM:
+                            try:
+                                if sub_shape.fill.type == MSO_FILL_TYPE.SOLID:
+                                    rgb = sub_shape.fill.fore_color.rgb
+                                    part_data['fill_color'] = f'rgb({rgb[0]}, {rgb[1]}, {rgb[2]})'
+                                else:
+                                    part_data['fill_color'] = 'transparent'
+                            except:
+                                part_data['fill_color'] = 'transparent'
+                        
+                        # Для PICTURE - сохраняем путь к изображению
+                        elif sub_shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                            try:
+                                image = sub_shape.image
+                                ext = image.ext
+                                img_data = image.blob
+                                img_name = f"slide{slide_num + 1}_qrpart{len(parts) + 1}.{ext}"
+                                img_path = os.path.join(self.images_dir, img_name)
+                                os.makedirs(os.path.dirname(img_path), exist_ok=True)
+                                with open(img_path, 'wb') as f:
+                                    f.write(img_data)
+                                part_data['image_path'] = f"images/{img_name}"
+                            except:
+                                part_data['image_path'] = None
+                        
+                        parts.append(part_data)
+                    except Exception as e:
+                        print(f"    Предупреждение: не удалось обработать часть группы: {e}")
+                        continue
+                
+                shape_data = {
+                    'type': 'qr-group',
+                    'style': {
+                        'position': 'absolute',
+                        'left': f"{left_percent:.3f}%",
+                        'top': f"{top_percent:.3f}%",
+                        'width': f"{width_percent:.3f}%",
+                        'height': f"{height_percent:.3f}%",
+                        'z-index': str(shape_counter),
+                    },
+                    'content': '',
+                    'image_type': 'qr-code',
+                    'is_composite': True,
+                    'num_parts': len(parts),
+                    'actual_size': (group_width_px, group_height_px),
+                    'parts': parts,  # Список всех частей группы
+                    'group_bounds': {  # Границы группы для расчета относительных позиций
+                        'left': group_left_px,
+                        'top': group_top_px,
+                        'width': group_width_px,
+                        'height': group_height_px
+                    }
+                }
+                
+                shapes_data.append(shape_data)
+                print(f"  QR-группа: {group_width_px}x{group_height_px}px ({len(parts)} частей) → composite qr-code")
+                print(f"    → Части: {len([p for p in parts if p['type'] == MSO_SHAPE_TYPE.FREEFORM])} FREEFORM, {len([p for p in parts if p['type'] == MSO_SHAPE_TYPE.PICTURE])} PICTURE")
+                
+            except Exception as e:
+                print(f"  Предупреждение: не удалось обработать QR-группу: {e}")
+        
         def process_shape_recursive(shape, level=0):
             """Рекурсивно обрабатывает фигуры, включая группы
             
@@ -780,10 +928,15 @@ class PPTXToHTMLConverter:
             
             # Проверяем, является ли это группой
             if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                # Обрабатываем каждую фигуру в группе рекурсивно
-                # Координаты дочерних элементов уже абсолютные!
-                for sub_shape in shape.shapes:
-                    process_shape_recursive(sub_shape, level + 1)
+                # Проверяем, является ли группа составным QR-кодом
+                if is_qr_code_group(shape):
+                    # Обрабатываем как единый QR-код
+                    process_qr_group_as_image(shape)
+                else:
+                    # Обычная группа - обрабатываем каждую фигуру рекурсивно
+                    # Координаты дочерних элементов уже абсолютные!
+                    for sub_shape in shape.shapes:
+                        process_shape_recursive(sub_shape, level + 1)
                 return
             
             shape_data = {
@@ -1118,6 +1271,45 @@ class PPTXToHTMLConverter:
                     html_parts.append(f'''
                 <div class="text-block" style="{style_str}">
                     {shape['content']}
+                </div>
+''')
+                elif shape['type'] == 'qr-group':
+                    # v16.3: Композитный QR-код из группы фигур
+                    parts = shape.get('parts', [])
+                    group_bounds = shape.get('group_bounds', {})
+                    
+                    # Создаем контейнер для композитного QR
+                    html_parts.append(f'''
+                <div class="qr-group-block" style="{style_str}; overflow: visible;">
+''')
+                    
+                    # Рендерим каждую часть группы
+                    for part in parts:
+                        # Вычисляем относительную позицию внутри группы
+                        rel_left = ((part['left'] - group_bounds['left']) / group_bounds['width']) * 100
+                        rel_top = ((part['top'] - group_bounds['top']) / group_bounds['height']) * 100
+                        rel_width = (part['width'] / group_bounds['width']) * 100
+                        rel_height = (part['height'] / group_bounds['height']) * 100
+                        
+                        part_style = f"position: absolute; left: {rel_left:.3f}%; top: {rel_top:.3f}%; width: {rel_width:.3f}%; height: {rel_height:.3f}%;"
+                        
+                        if part['type'] == MSO_SHAPE_TYPE.FREEFORM:
+                            # FREEFORM - отрисовываем как цветной прямоугольник
+                            fill_color = part.get('fill_color', 'transparent')
+                            html_parts.append(f'''
+                    <div class="qr-part qr-freeform" style="{part_style} background-color: {fill_color};"></div>
+''')
+                        elif part['type'] == MSO_SHAPE_TYPE.PICTURE:
+                            # PICTURE - отрисовываем как изображение
+                            img_path = part.get('image_path')
+                            if img_path:
+                                html_parts.append(f'''
+                    <div class="qr-part qr-picture" style="{part_style}">
+                        <img src="{img_path}" alt="QR Part" style="width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;">
+                    </div>
+''')
+                    
+                    html_parts.append('''
                 </div>
 ''')
                 elif shape['type'] == 'image':
@@ -1726,9 +1918,9 @@ def main():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     
     print("=" * 60)
-    print("PPTX to HTML Converter v16.2")
+    print("PPTX to HTML Converter v16.3")
     print("Конвертер презентаций PowerPoint в веб-страницы")
-    print("v16.2: Исправлена прозрачность PNG изображений")
+    print("v16.3: Добавлена поддержка композитных QR-кодов")
     print("=" * 60)
     print()
     
