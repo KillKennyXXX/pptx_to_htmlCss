@@ -818,8 +818,19 @@ class PPTXToHTMLConverter:
                     img_path = self.save_image(shape.image, slide_num, img_counter, "img")
                     
                     if img_path:
+                        # Для изображений создаём стиль БЕЗ background-color
+                        # Копируем base_style и удаляем фон, чтобы сохранить прозрачность PNG
+                        image_style = base_style.copy()
+                        if 'background-color' in image_style:
+                            del image_style['background-color']
+                        if 'background' in image_style:
+                            del image_style['background']
+                        if 'opacity' in image_style:
+                            # Opacity для картинок сохраняем
+                            pass
+                        
                         shape_data['type'] = 'image'
-                        shape_data['style'] = base_style
+                        shape_data['style'] = image_style
                         shape_data['content'] = img_path
                         
                         # v15: Классификация изображения
@@ -1668,11 +1679,6 @@ body {{
     }}
 }}
 
-.slide img {{
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-    background-size: 200% 100%;
-}}
-
 /* Fullscreen mode adjustments */
 .presentation-container:fullscreen .slide {{
     width: 95vw;
@@ -1720,9 +1726,9 @@ def main():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     
     print("=" * 60)
-    print("PPTX to HTML Converter v16")
+    print("PPTX to HTML Converter v16.2")
     print("Конвертер презентаций PowerPoint в веб-страницы")
-    print("v16: Градиенты, тени, границы, трансформации")
+    print("v16.2: Исправлена прозрачность PNG изображений")
     print("=" * 60)
     print()
     
