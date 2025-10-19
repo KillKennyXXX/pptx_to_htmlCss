@@ -1,6 +1,9 @@
 """
-PPTX to HTML Converter
+PPTX to HTML Converter (v16)
 Конвертирует презентации PowerPoint в веб-страницы с сохранением форматирования
+
+Версия 15: Улучшенная классификация изображений (QR-коды, иконки, логотипы)
+Версия 16: Полное извлечение стилей (градиенты, тени, границы, трансформации)
 """
 
 from pptx import Presentation
@@ -13,6 +16,12 @@ import base64
 from pathlib import Path
 import json
 import re
+
+# Импортируем классификатор изображений
+from image_classifier import ImageClassifier
+
+# v16: Импортируем извлекатель продвинутых стилей
+from style_extractor import style_extractor
 
 
 class PPTXToHTMLConverter:
@@ -30,6 +39,9 @@ class PPTXToHTMLConverter:
         self.prs = None
         self.slide_data = []
         self.current_slide_bg_color = None  # Для определения дефолтного цвета текста
+        
+        # v15: Инициализируем классификатор изображений
+        self.image_classifier = ImageClassifier()
         
         # Создаем директории
         os.makedirs(self.output_dir, exist_ok=True)
@@ -251,69 +263,29 @@ class PPTXToHTMLConverter:
         }
         
         try:
-            # FILL (заливка)
+            # v16: Используем StyleExtractor для продвинутых стилей
+            
+            # FILL (заливка) - поддержка SOLID, GRADIENT, PATTERN, PICTURE
             if hasattr(shape, 'fill'):
-                fill_type = shape.fill.type
-                
-                if fill_type == 1:  # SOLID
-                    bg_color = self.rgb_to_hex(shape.fill.fore_color)
-                    if bg_color:
-                        style['background-color'] = bg_color
-                    
-                    # Прозрачность заливки
-                    try:
-                        if hasattr(shape.fill.fore_color, 'transparency'):
-                            transparency = shape.fill.fore_color.transparency
-                            if transparency is not None and transparency > 0:
-                                opacity = 1.0 - transparency
-                                style['opacity'] = f"{opacity:.2f}"
-                    except:
-                        pass
-                        
-                elif fill_type == 6:  # PICTURE - обрабатывается отдельно
-                    pass
-                elif fill_type == 3:  # GRADIENT
-                    # TODO: Добавить поддержку градиентов если нужно
-                    pass
+                fill_styles = style_extractor.extract_fill_style(shape.fill)
+                style.update(fill_styles)
             
-            # LINE (граница)
+            # LINE (граница) - поддержка разных стилей линий
             if hasattr(shape, 'line'):
-                line = shape.line
-                border_parts = []
-                
-                # Толщина линии
-                border_width_px = None
-                if hasattr(line, 'width') and line.width:
-                    try:
-                        # Пробуем получить в pt
-                        border_width_px = self.pt_to_px(line.width.pt)
-                    except:
-                        try:
-                            # Если не получается, конвертируем из EMU
-                            border_width_px = self.emu_to_px(line.width)
-                        except:
-                            pass
-                
-                # Цвет линии
-                border_color = None
-                if hasattr(line, 'color') and line.color:
-                    border_color = self.rgb_to_hex(line.color)
-                
-                # Если есть цвет или толщина, добавляем границу
-                if border_color or border_width_px:
-                    width_str = f"{border_width_px:.1f}px" if border_width_px else "1px"
-                    color_str = border_color if border_color else "#000000"
-                    style['border'] = f"{width_str} solid {color_str}"
+                line_styles = style_extractor.extract_line_style(shape.line)
+                style.update(line_styles)
             
-            # ROTATION (поворот)
-            if hasattr(shape, 'rotation'):
-                rotation = shape.rotation
-                if rotation != 0:
-                    style['transform'] = f"rotate({rotation}deg)"
-                    style['transform-origin'] = 'center center'
+            # EFFECTS (эффекты) - тени, свечение и т.д.
+            shadow_styles = style_extractor.extract_shadow_effect(shape)
+            style.update(shadow_styles)
+            
+            # TRANSFORMS (трансформации) - rotation, flip
+            transform_styles = style_extractor.extract_transform_style(shape)
+            style.update(transform_styles)
                     
         except Exception as e:
             # Игнорируем ошибки извлечения стилей
+            print(f"      ⚠️ Ошибка извлечения стилей: {e}")
             pass
         
         return style
@@ -850,20 +822,49 @@ class PPTXToHTMLConverter:
                         shape_data['style'] = base_style
                         shape_data['content'] = img_path
                         
-                        # Определяем фактические размеры изображения для QR-кодов
+                        # v15: Классификация изображения
                         try:
                             from PIL import Image
                             full_path = os.path.join(self.images_dir, os.path.basename(img_path))
-                            with Image.open(full_path) as img:
-                                actual_w, actual_h = img.size
                             
-                            # Помечаем маленькие изображения (QR-коды) для пиксельного рендеринга
-                            if actual_w < 100 and actual_h < 100:
+                            # Получаем позицию на слайде
+                            left_percent = float(base_style['left'].rstrip('%'))
+                            top_percent = float(base_style['top'].rstrip('%'))
+                            width_px = shape.width // 9525
+                            height_px = shape.height // 9525
+                            
+                            # Классифицируем изображение
+                            classification = self.image_classifier.classify(
+                                full_path,
+                                (left_percent, top_percent),
+                                (width_px, height_px)
+                            )
+                            
+                            img_type = classification['type']
+                            actual_w, actual_h = classification['actual_size']
+                            
+                            # Сохраняем классификацию
+                            shape_data['image_type'] = img_type
+                            shape_data['actual_size'] = (actual_w, actual_h)
+                            shape_data['classification_confidence'] = classification['confidence']
+                            
+                            print(f"  Изображение: {actual_w}x{actual_h}px → {img_type} ({classification['confidence']:.0%})")
+                            
+                            # Для QR-кодов сохраняем флаг is_small для обратной совместимости
+                            if img_type == 'qr-code':
                                 shape_data['is_small'] = True
+                                print(f"    → QR-код будет отображён в фактическом размере")
+                            
+                        except Exception as e_classify:
+                            print(f"  Предупреждение: не удалось классифицировать изображение: {e_classify}")
+                            # Fallback к старой логике
+                            try:
+                                with Image.open(full_path) as img:
+                                    actual_w, actual_h = img.size
                                 shape_data['actual_size'] = (actual_w, actual_h)
-                                print(f"  Обнаружено маленькое изображение: {actual_w}x{actual_h}px (будет отображено в фактическом размере)")
-                        except Exception as e_size:
-                            print(f"  Предупреждение: не удалось определить размер изображения: {e_size}")
+                                shape_data['image_type'] = 'unknown'
+                            except:
+                                pass
                         
                         shapes_data.append(shape_data)
                 except Exception as e:
@@ -1109,18 +1110,49 @@ class PPTXToHTMLConverter:
                 </div>
 ''')
                 elif shape['type'] == 'image':
-                    # Для маленьких изображений (QR-коды) используем фактические размеры в пикселях
-                    if shape.get('is_small', False) and 'actual_size' in shape:
-                        actual_w, actual_h = shape['actual_size']
-                        # Центрируем изображение в контейнере и отображаем в фактическом размере
+                    # v15: Рендеринг по типу изображения
+                    img_type = shape.get('image_type', 'unknown')
+                    actual_w, actual_h = shape.get('actual_size', (0, 0))
+                    
+                    if img_type == 'qr-code':
+                        # QR-коды: фактический размер, без масштабирования, резкость
                         html_parts.append(f'''
+                <div class="image-block qr-code" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+                    <img src="{shape['content']}" alt="QR Code" style="width: {actual_w}px; height: {actual_h}px; object-fit: none; image-rendering: pixelated;">
+                </div>
+''')
+                    elif img_type == 'icon':
+                        # Иконки: пропорциональное масштабирование, центрирование
+                        html_parts.append(f'''
+                <div class="image-block icon" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+                    <img src="{shape['content']}" alt="Icon" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+                </div>
+''')
+                    elif img_type == 'logo':
+                        # Логотипы: сохранение пропорций, без растяжения
+                        html_parts.append(f'''
+                <div class="image-block logo" style="{style_str}">
+                    <img src="{shape['content']}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain;">
+                </div>
+''')
+                    elif img_type == 'diagram':
+                        # Диаграммы: contain для сохранения читаемости
+                        html_parts.append(f'''
+                <div class="image-block diagram" style="{style_str}">
+                    <img src="{shape['content']}" alt="Diagram" style="width: 100%; height: 100%; object-fit: contain;">
+                </div>
+''')
+                    else:
+                        # Фото и неизвестные: стандартный рендеринг
+                        # Fallback к старой логике для обратной совместимости
+                        if shape.get('is_small', False) and actual_w > 0:
+                            html_parts.append(f'''
                 <div class="image-block" style="{style_str}; display: flex; align-items: center; justify-content: center;">
                     <img src="{shape['content']}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
                 </div>
 ''')
-                    else:
-                        # Обычные изображения масштабируются пропорционально
-                        html_parts.append(f'''
+                        else:
+                            html_parts.append(f'''
                 <div class="image-block" style="{style_str}">
                     <img src="{shape['content']}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
                 </div>
@@ -1682,10 +1714,15 @@ body {{
 def main():
     """Главная функция"""
     import sys
+    import io
+    
+    # Устанавливаем UTF-8 для вывода
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     
     print("=" * 60)
-    print("PPTX to HTML Converter")
+    print("PPTX to HTML Converter v16")
     print("Конвертер презентаций PowerPoint в веб-страницы")
+    print("v16: Градиенты, тени, границы, трансформации")
     print("=" * 60)
     print()
     
