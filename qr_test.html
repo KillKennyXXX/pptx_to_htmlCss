@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>QR Code Rendering Test</title>
+<style>
+.container {
+    position: relative;
+    width: 300px;
+    height: 300px;
+    margin: 20px;
+    display: inline-block;
+    border: 2px solid #ccc;
+}
+
+.white-bg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #ffffff;
+}
+
+.black-block {
+    position: absolute;
+    background-color: #000101;
+}
+
+.darkgrey-block {
+    position: absolute;
+    background-color: #211d1e;
+}
+
+/* Вариант 1: Обычный (без эффектов) */
+.variant1 .black-block,
+.variant1 .darkgrey-block {
+    /* default */
+}
+
+/* Вариант 2: С полупрозрачностью */
+.variant2 .black-block {
+    opacity: 0.9;
+}
+.variant2 .darkgrey-block {
+    opacity: 0.5;
+}
+
+/* Вариант 3: С multiply blend mode */
+.variant3 .black-block,
+.variant3 .darkgrey-block {
+    mix-blend-mode: multiply;
+}
+
+/* Вариант 4: С darken blend mode */
+.variant4 .black-block,
+.variant4 .darkgrey-block {
+    mix-blend-mode: darken;
+}
+
+/* Вариант 5: С difference blend mode */
+.variant5 .black-block,
+.variant5 .darkgrey-block {
+    mix-blend-mode: difference;
+}
+
+h3 {
+    margin: 5px 0;
+    font-family: Arial;
+    font-size: 14px;
+}
+</style>
+</head>
+<body style="background: #f0f0f0; padding: 20px;">
+
+<h2>QR Code Rendering Tests</h2>
+
+<div>
+    <h3>Вариант 1: Обычный (no effects)</h3>
+    <div class="container variant1">
+        <div class="white-bg"></div>
+        <!-- Имитация QR-кода -->
+        <div class="black-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="darkgrey-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="black-block" style="left: 50%; top: 10%; width: 40%; height: 20%;"></div>
+        <div class="darkgrey-block" style="left: 50%; top: 40%; width: 40%; height: 30%;"></div>
+    </div>
+</div>
+
+<div>
+    <h3>Вариант 2: С полупрозрачностью (opacity)</h3>
+    <div class="container variant2">
+        <div class="white-bg"></div>
+        <div class="black-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="darkgrey-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="black-block" style="left: 50%; top: 10%; width: 40%; height: 20%;"></div>
+        <div class="darkgrey-block" style="left: 50%; top: 40%; width: 40%; height: 30%;"></div>
+    </div>
+</div>
+
+<div>
+    <h3>Вариант 3: mix-blend-mode: multiply</h3>
+    <div class="container variant3">
+        <div class="white-bg"></div>
+        <div class="black-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="darkgrey-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="black-block" style="left: 50%; top: 10%; width: 40%; height: 20%;"></div>
+        <div class="darkgrey-block" style="left: 50%; top: 40%; width: 40%; height: 30%;"></div>
+    </div>
+</div>
+
+<div>
+    <h3>Вариант 4: mix-blend-mode: darken</h3>
+    <div class="container variant4">
+        <div class="white-bg"></div>
+        <div class="black-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="darkgrey-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="black-block" style="left: 50%; top: 10%; width: 40%; height: 20%;"></div>
+        <div class="darkgrey-block" style="left: 50%; top: 40%; width: 40%; height: 30%;"></div>
+    </div>
+</div>
+
+<div>
+    <h3>Вариант 5: mix-blend-mode: difference</h3>
+    <div class="container variant5">
+        <div class="white-bg"></div>
+        <div class="black-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="darkgrey-block" style="left: 10%; top: 10%; width: 30%; height: 30%;"></div>
+        <div class="black-block" style="left: 50%; top: 10%; width: 40%; height: 20%;"></div>
+        <div class="darkgrey-block" style="left: 50%; top: 40%; width: 40%; height: 30%;"></div>
+    </div>
+</div>
+
+</body>
+</html>

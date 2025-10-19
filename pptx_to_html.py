@@ -29,6 +29,7 @@ class PPTXToHTMLConverter:
         self.images_dir = os.path.join(output_dir, 'images')
         self.prs = None
         self.slide_data = []
+        self.current_slide_bg_color = None  # Для определения дефолтного цвета текста
         
         # Создаем директории
         os.makedirs(self.output_dir, exist_ok=True)
@@ -40,8 +41,31 @@ class PPTXToHTMLConverter:
         self.prs = Presentation(self.pptx_path)
         print(f"Найдено слайдов: {len(self.prs.slides)}")
     
+    def get_default_text_color(self):
+        """Определяет дефолтный цвет текста на основе яркости фона слайда"""
+        if not self.current_slide_bg_color:
+            return '#000000'  # Черный по умолчанию
+        
+        try:
+            # Убираем #
+            hex_color = self.current_slide_bg_color.lstrip('#')
+            
+            # Конвертируем в RGB
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            
+            # Вычисляем яркость (luminance) по формуле
+            luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+            
+            # Если фон темный (luminance < 0.5), используем белый текст
+            # Если фон светлый, используем черный текст
+            return '#ffffff' if luminance < 0.5 else '#000000'
+        except:
+            return '#000000'
+    
     def rgb_to_hex(self, rgb_color):
-        """Конвертирует RGB в HEX"""
+        """Конвертирует RGB в HEX с правильной обработкой theme colors"""
         if rgb_color is None:
             return None
         try:
@@ -49,29 +73,25 @@ class PPTXToHTMLConverter:
             if hasattr(rgb_color, 'type'):
                 color_type = rgb_color.type
                 
-                # Если это theme color (SCHEME), используем дефолтные значения
-                if color_type == 2:  # MSO_COLOR_TYPE.SCHEME
-                    if hasattr(rgb_color, 'theme_color'):
-                        theme = rgb_color.theme_color
-                        # Дефолтные значения для популярных theme colors
-                        theme_colors = {
-                            14: '#FFFFFF',  # BACKGROUND_1 - white
-                            15: '#000000',  # TEXT_1 - black
-                            12: '#1F497D',  # ACCENT_1 - dark blue
-                            13: '#C0504D',  # ACCENT_2 - red
-                            # Добавьте другие, если нужно
-                        }
-                        color = theme_colors.get(theme)
-                        if color:
-                            return color
+                # Если это RGB color (type = 1) - прямой RGB
+                if color_type == 1:  # MSO_COLOR_TYPE.RGB
+                    try:
+                        if hasattr(rgb_color, 'rgb'):
+                            r, g, b = rgb_color.rgb
+                            return f'#{r:02x}{g:02x}{b:02x}'
+                    except:
+                        pass
                 
-                # Если это RGB color (type = 1)
-                try:
-                    if hasattr(rgb_color, 'rgb'):
-                        r, g, b = rgb_color.rgb
-                        return f'#{r:02x}{g:02x}{b:02x}'
-                except:
-                    pass
+                # Если это theme color (SCHEME) - извлекаем реальный RGB
+                elif color_type == 2:  # MSO_COLOR_TYPE.SCHEME
+                    try:
+                        # Получаем реальный RGB через встроенный метод
+                        # Этот метод учитывает brightness, tint и shade
+                        if hasattr(rgb_color, 'rgb'):
+                            r, g, b = rgb_color.rgb
+                            return f'#{r:02x}{g:02x}{b:02x}'
+                    except:
+                        pass
             
             # Если это прямой RGBColor объект
             if hasattr(rgb_color, 'rgb'):
@@ -127,10 +147,18 @@ class PPTXToHTMLConverter:
                 style['font-size'] = f"{self.pt_to_px(run.font.size.pt)}px"
             
             # Цвет текста
-            if run.font.color and run.font.color.type:
-                color = self.rgb_to_hex(run.font.color)
-                if color:
-                    style['color'] = color
+            if run.font.color:
+                if run.font.color.type:
+                    # Явно заданный цвет
+                    color = self.rgb_to_hex(run.font.color)
+                    if color:
+                        style['color'] = color
+                else:
+                    # Цвет не задан явно - используем дефолтный на основе фона слайда
+                    style['color'] = self.get_default_text_color()
+            else:
+                # Если color вообще None, используем дефолтный на основе фона
+                style['color'] = self.get_default_text_color()
             
             # Жирный
             if run.font.bold:
@@ -176,8 +204,18 @@ class PPTXToHTMLConverter:
         return style
     
     def extract_shape_style(self, shape, slide_width, slide_height):
-        """Извлекает стили формы с процентными размерами для адаптивности"""
-        # Абсолютные значения в пикселях
+        """Извлекает стили формы с процентными размерами для адаптивности
+        
+        Args:
+            shape: Фигура для извлечения стилей
+            slide_width: Ширина слайда в пикселях
+            slide_height: Высота слайда в пикселях
+        
+        Note:
+            Координаты shape.left и shape.top уже абсолютные относительно слайда,
+            даже для фигур внутри групп (python-pptx автоматически это учитывает)
+        """
+        # Абсолютные значения в пикселях (уже учитывают положение в группе)
         left_px = self.emu_to_px(shape.left)
         top_px = self.emu_to_px(shape.top)
         width_px = self.emu_to_px(shape.width)
@@ -198,26 +236,69 @@ class PPTXToHTMLConverter:
         }
         
         try:
-            # Фон
-            if hasattr(shape, 'fill') and shape.fill.type:
-                if shape.fill.type == 1:  # SOLID
+            # FILL (заливка)
+            if hasattr(shape, 'fill'):
+                fill_type = shape.fill.type
+                
+                if fill_type == 1:  # SOLID
                     bg_color = self.rgb_to_hex(shape.fill.fore_color)
                     if bg_color:
                         style['background-color'] = bg_color
+                    
+                    # Прозрачность заливки
+                    try:
+                        if hasattr(shape.fill.fore_color, 'transparency'):
+                            transparency = shape.fill.fore_color.transparency
+                            if transparency is not None and transparency > 0:
+                                opacity = 1.0 - transparency
+                                style['opacity'] = f"{opacity:.2f}"
+                    except:
+                        pass
+                        
+                elif fill_type == 6:  # PICTURE - обрабатывается отдельно
+                    pass
+                elif fill_type == 3:  # GRADIENT
+                    # TODO: Добавить поддержку градиентов если нужно
+                    pass
             
-            # Граница
+            # LINE (граница)
             if hasattr(shape, 'line'):
-                if shape.line.color:
-                    border_color = self.rgb_to_hex(shape.line.color)
-                    if border_color:
-                        border_width = self.pt_to_px(shape.line.width.pt) if shape.line.width else 1
-                        style['border'] = f"{border_width}px solid {border_color}"
+                line = shape.line
+                border_parts = []
+                
+                # Толщина линии
+                border_width_px = None
+                if hasattr(line, 'width') and line.width:
+                    try:
+                        # Пробуем получить в pt
+                        border_width_px = self.pt_to_px(line.width.pt)
+                    except:
+                        try:
+                            # Если не получается, конвертируем из EMU
+                            border_width_px = self.emu_to_px(line.width)
+                        except:
+                            pass
+                
+                # Цвет линии
+                border_color = None
+                if hasattr(line, 'color') and line.color:
+                    border_color = self.rgb_to_hex(line.color)
+                
+                # Если есть цвет или толщина, добавляем границу
+                if border_color or border_width_px:
+                    width_str = f"{border_width_px:.1f}px" if border_width_px else "1px"
+                    color_str = border_color if border_color else "#000000"
+                    style['border'] = f"{width_str} solid {color_str}"
             
-            # Поворот
-            if hasattr(shape, 'rotation') and shape.rotation != 0:
-                style['transform'] = f"rotate({shape.rotation}deg)"
-                style['transform-origin'] = 'center center'
-        except:
+            # ROTATION (поворот)
+            if hasattr(shape, 'rotation'):
+                rotation = shape.rotation
+                if rotation != 0:
+                    style['transform'] = f"rotate({rotation}deg)"
+                    style['transform-origin'] = 'center center'
+                    
+        except Exception as e:
+            # Игнорируем ошибки извлечения стилей
             pass
         
         return style
@@ -373,9 +454,36 @@ class PPTXToHTMLConverter:
             slide_layout = slide.slide_layout
             slide_master = slide_layout.slide_master
             
-            # Метод 1: Ищем большие изображения в slide layout shapes
+            # Метод 1: Ищем большие FREEFORM фигуры с цветной заливкой и PICTURE в slide layout shapes
+            # Важно: сначала проверяем FREEFORM (могут быть фоном под изображением)
             slide_area = self.emu_to_px(self.prs.slide_width) * self.emu_to_px(self.prs.slide_height)
             
+            # Проход 1: Ищем FREEFORM с solid fill (может быть цветным фоном под изображением)
+            for shape in slide_layout.shapes:
+                try:
+                    if shape.shape_type == MSO_SHAPE_TYPE.FREEFORM:
+                        width = self.emu_to_px(shape.width)
+                        height = self.emu_to_px(shape.height)
+                        area = width * height
+                        area_percent = (area / slide_area) * 100
+                        
+                        # Если FREEFORM занимает больше 90% слайда, это фон
+                        if area_percent > 90:
+                            left = self.emu_to_px(shape.left)
+                            top = self.emu_to_px(shape.top)
+                            
+                            if left < 10 and top < 10:  # Начинается с начала слайда
+                                # Проверяем заливку
+                                if hasattr(shape, 'fill') and shape.fill.type == 1:  # SOLID
+                                    bg_color = self.rgb_to_hex(shape.fill.fore_color)
+                                    if bg_color:
+                                        print(f"  ✓ Цвет фона из slide layout (FREEFORM): {bg_color}")
+                                        # Не возвращаем сразу, продолжаем искать изображение
+                                        break
+                except:
+                    continue
+            
+            # Проход 2: Ищем PICTURE (может быть поверх цветного фона)
             for shape in slide_layout.shapes:
                 try:
                     if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
@@ -396,9 +504,17 @@ class PPTXToHTMLConverter:
                                 f.write(shape.image.blob)
                             
                             print(f"  ✓ Фон из slide layout (изображение): {img_filename}")
-                            return (None, f"images/{img_filename}")
+                            bg_image = f"images/{img_filename}"
+                            # Если есть и цвет и изображение, возвращаем оба
+                            if bg_color and bg_image:
+                                print(f"  ✓ Комбинированный фон: цвет {bg_color} + изображение")
+                            return (bg_color, bg_image)
                 except:
                     continue
+            
+            # Если нашли только цвет (без изображения), возвращаем его
+            if bg_color:
+                return (bg_color, None)
             
             # Метод 2: Проверяем background fill в slide layout
             if hasattr(slide_layout, 'background') and hasattr(slide_layout.background, 'fill'):
@@ -639,9 +755,21 @@ class PPTXToHTMLConverter:
             except Exception as e:
                 print(f"  Предупреждение: не удалось обработать фон слайда: {e}")
         
+        # Сохраняем цвет фона для определения дефолтного цвета текста
+        self.current_slide_bg_color = background if background else '#FFFFFF'
+        
         # Обработка фигур (включая группы)
         def process_shape_recursive(shape, level=0):
-            """Рекурсивно обрабатывает фигуры, включая группы"""
+            """Рекурсивно обрабатывает фигуры, включая группы
+            
+            Args:
+                shape: Фигура для обработки
+                level: Уровень вложенности (0 = слайд, 1+ = внутри группы)
+            
+            Note:
+                Координаты фигур внутри групп в python-pptx уже абсолютные относительно слайда,
+                поэтому нет необходимости добавлять offset группы.
+            """
             nonlocal img_counter
             
             # Пропускаем FREEFORM фигуры, которые использованы как фон слайда
@@ -664,7 +792,8 @@ class PPTXToHTMLConverter:
             
             # Проверяем, является ли это группой
             if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                # Обрабатываем каждую фигуру в группе
+                # Обрабатываем каждую фигуру в группе рекурсивно
+                # Координаты дочерних элементов уже абсолютные!
                 for sub_shape in shape.shapes:
                     process_shape_recursive(sub_shape, level + 1)
                 return
@@ -676,6 +805,7 @@ class PPTXToHTMLConverter:
             }
             
             try:
+                # Координаты shape уже абсолютные, offset не нужен
                 base_style = self.extract_shape_style(shape, slide_width, slide_height)
             except Exception as e:
                 print(f"  Предупреждение: не удалось извлечь стиль фигуры: {e}")
@@ -779,37 +909,25 @@ class PPTXToHTMLConverter:
                                         print(f"  Предупреждение: не удалось извлечь заливку-изображение: {e}")
                                 
                                 # Если не изображение, обрабатываем как обычную фигуру
+                                # base_style уже содержит все стили из extract_shape_style (background-color, border, opacity и т.д.)
                                 if shape.fill.type == 1:  # SOLID
                                     shape_data['type'] = 'shape'
-                                    shape_data['style'] = base_style
-                                    bg_color = self.rgb_to_hex(shape.fill.fore_color)
-                                    shape_data['style']['background-color'] = bg_color
+                                    shape_data['style'] = base_style  # Используем уже извлеченные стили
                                     shape_data['content'] = ''
                                     shapes_data.append(shape_data)
                             except Exception as e_fill:
                                 pass
                         
-                        # Проверяем границы
-                        has_line = hasattr(shape, 'line') and hasattr(shape.line, 'color')
-                        if has_line and not has_fill:
-                            shape_data['type'] = 'shape'
-                            shape_data['style'] = base_style
+                        # Если нет заливки, но есть граница или другие визуальные стили
+                        # base_style уже содержит все стили из extract_shape_style
+                        elif not has_fill:
+                            has_line = hasattr(shape, 'line') and hasattr(shape.line, 'color') and shape.line.color
                             
-                            try:
-                                if hasattr(shape.line, 'width') and shape.line.width:
-                                    border_width = self.emu_to_px(shape.line.width)
-                                    border_width_percent = (border_width / slide_width) * 100
-                                    shape_data['style']['border-width'] = f"{border_width_percent:.3f}%"
-                                    shape_data['style']['border-style'] = 'solid'
-                                    
-                                    if hasattr(shape.line, 'color'):
-                                        border_color = self.rgb_to_hex(shape.line.color)
-                                        shape_data['style']['border-color'] = border_color
-                            except:
-                                pass
-                            
-                            shape_data['content'] = ''
-                            shapes_data.append(shape_data)
+                            if has_line:
+                                shape_data['type'] = 'shape'
+                                shape_data['style'] = base_style  # Используем уже извлеченные стили (включая border)
+                                shape_data['content'] = ''
+                                shapes_data.append(shape_data)
                     except:
                         pass  # Пропускаем фигуры, которые не можем обработать
             
