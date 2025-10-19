@@ -10,3 +10,5 @@ QUICKSTART.md
 pptx_backup.json
 diagnose*
 *REPORT*
+doc/
+tests/
