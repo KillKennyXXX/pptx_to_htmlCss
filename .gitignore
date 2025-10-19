@@ -1,0 +1,10 @@
+*output*/
+__pycache__/
+*.pptx
+LICENSES_GUIDE.md
+PPTX_V*
+PROJECT_SUMMARY.md
+QR_CODE_ISSUE_ANALYSIS.md
+README_OLD.md
+QUICKSTART.md
+pptx_backup.json
