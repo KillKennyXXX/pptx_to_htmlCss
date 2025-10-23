@@ -1,0 +1,615 @@
+/* Flipbook Template Styles - Enhanced Version */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    overflow: hidden;
+}
+
+.flipbook-container {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Верхняя панель управления - СКРЫТА */
+.controls-top {
+    display: none;
+}
+
+.control-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 18px;
+    transition: all 0.3s ease;
+}
+
+.control-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+}
+
+.page-counter {
+    margin-left: auto;
+    color: white;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+/* Основной контейнер flipbook */
+.flipbook-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow: visible;
+    position: relative;
+    perspective: 2400px;
+}
+
+/* Основной контейнер флипбука */
+#flipbook {
+    /* Размеры контролируются Turn.js, не задаём здесь! */
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    position: relative;
+    margin: 0 auto;
+}
+
+/* КРИТИЧНО: Все потомки flipbook не должны блокировать события */
+#flipbook * {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+/* Стили страницы */
+.page {
+    background: white;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* Контейнер для контента страницы - НЕ блокирует события Turn.js */
+.page .slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* КРИТИЧНО! */
+}
+
+/* Разрешаем события только для интерактивных элементов */
+.page .slide a,
+.page .slide button,
+.page .slide input,
+.page .slide select,
+.page .slide textarea {
+    pointer-events: auto;
+}
+
+.page-content {
+    width: 100%;
+    height: 100%;
+    position: relative;
+}
+
+.page-content img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Turn.js специфичные стили - УЛУЧШЕННЫЕ */
+.turn-page {
+    background-color: white;
+    background-size: 100% 100%;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+}
+
+.turn-page-wrapper {
+    perspective: 2400px;
+    transform-style: preserve-3d;
+}
+
+/* КРИТИЧНО: Градиенты Turn.js должны быть видимы и усилены */
+.turn-page .gradient {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: linear-gradient(
+        90deg, 
+        rgba(0, 0, 0, 0.5) 0%, 
+        rgba(0, 0, 0, 0.3) 30%,
+        rgba(0, 0, 0, 0) 100%
+    ) !important;
+    pointer-events: none;
+}
+
+/* Усиленные тени для эффекта глубины */
+.turn-page .gradient.gradient-1 {
+    background-image: linear-gradient(
+        to left,
+        rgba(0, 0, 0, 0.6) 0%,
+        rgba(0, 0, 0, 0) 100%
+    ) !important;
+}
+
+.turn-page .gradient.gradient-2 {
+    background-image: linear-gradient(
+        to right,
+        rgba(0, 0, 0, 0.6) 0%,
+        rgba(0, 0, 0, 0) 100%
+    ) !important;
+}
+
+/* Курсоры для разных зон страницы */
+.turn-page.p1 {
+    cursor: default;
+}
+
+.turn-page.p2:hover {
+    cursor: e-resize;
+}
+
+.turn-page:not(.p1):not(.p2):hover {
+    cursor: w-resize;
+}
+
+/* Усиленный эффект загиба страницы */
+.turn-page.even {
+    box-shadow: 
+        inset 0 0 20px rgba(0, 0, 0, 0.15),
+        -5px 0 15px rgba(0, 0, 0, 0.3);
+}
+
+.turn-page.odd {
+    box-shadow: 
+        inset 0 0 20px rgba(0, 0, 0, 0.15),
+        5px 0 15px rgba(0, 0, 0, 0.3);
+}
+
+/* Эффект загнутого уголка при наведении */
+.turn-page.p2::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 0 0 40px 40px;
+    border-color: transparent transparent rgba(0, 0, 0, 0.15) transparent;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.turn-page.p2:hover::after {
+    opacity: 1;
+}
+
+/* Градиенты при перелистывании */
+.turn-page.gradient {
+    background: linear-gradient(
+        to left,
+        rgba(0, 0, 0, 0) 0%,
+        rgba(0, 0, 0, 0.05) 20%,
+        rgba(0, 0, 0, 0.1) 100%
+    );
+}
+
+/* Тень при перелистывании */
+.shadow {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 50px;
+    background: linear-gradient(
+        to right,
+        rgba(0, 0, 0, 0.3) 0%,
+        rgba(0, 0, 0, 0.1) 50%,
+        rgba(0, 0, 0, 0) 100%
+    );
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.shadow.left {
+    left: 0;
+}
+
+.shadow.right {
+    right: 0;
+    background: linear-gradient(
+        to left,
+        rgba(0, 0, 0, 0.3) 0%,
+        rgba(0, 0, 0, 0.1) 50%,
+        rgba(0, 0, 0, 0) 100%
+    );
+}
+
+/* Эффект перелистывания */
+.turning .shadow {
+    opacity: 1;
+}
+
+/* Загиб угла страницы */
+.page-corner {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 0 0 50px 50px;
+    border-color: transparent transparent rgba(0, 0, 0, 0.1) transparent;
+    transition: all 0.3s ease;
+}
+
+.page-corner.top-right {
+    top: 0;
+    right: 0;
+    transform: rotate(180deg);
+}
+
+.page-corner.bottom-left {
+    bottom: 0;
+    left: 0;
+}
+
+.page:hover .page-corner {
+    border-width: 0 0 70px 70px;
+}
+
+/* Нижняя панель управления */
+.controls-bottom {
+    background: rgba(0, 0, 0, 0.8);
+    padding: 20px 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    box-shadow: 0 -4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.nav-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 20px;
+    transition: all 0.3s ease;
+}
+
+.nav-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.nav-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.page-slider {
+    flex: 1;
+    max-width: 400px;
+    height: 8px;
+    border-radius: 5px;
+    outline: none;
+    background: rgba(255, 255, 255, 0.2);
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.page-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.page-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Панель миниатюр */
+.thumbnails-panel {
+    position: fixed;
+    right: -350px;
+    top: 0;
+    width: 350px;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.95);
+    box-shadow: -5px 0 15px rgba(0, 0, 0, 0.5);
+    transition: right 0.3s ease;
+    z-index: 2000;
+    overflow-y: auto;
+}
+
+.thumbnails-panel.open {
+    right: 0;
+}
+
+.thumbnails-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    position: sticky;
+    top: 0;
+    background: rgba(0, 0, 0, 0.95);
+}
+
+.thumbnails-header h3 {
+    color: white;
+    font-size: 18px;
+}
+
+#close-thumbnails {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 5px;
+}
+
+.thumbnails-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 15px;
+    padding: 20px;
+}
+
+.thumbnail {
+    cursor: pointer;
+    border: 3px solid transparent;
+    border-radius: 5px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    position: relative;
+    background: white;
+    width: 300px;
+    height: 225px;
+}
+
+.thumbnail:hover {
+    transform: scale(1.05);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.thumbnail.active {
+    border-color: #667eea;
+    box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+}
+
+.thumbnail img,
+.thumbnail iframe {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+}
+
+.thumbnail-number {
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+/* Масштабирование */
+.flipbook-wrapper.zoomed #flipbook {
+    width: 120%;
+    height: 120%;
+}
+
+.flipbook-wrapper.zoomed-out #flipbook {
+    width: 70%;
+    height: 70%;
+}
+
+/* Полноэкранный режим */
+.flipbook-container.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+}
+
+/* Анимация загрузки */
+.loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 24px;
+    text-align: center;
+}
+
+.loading::after {
+    content: '...';
+    animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+/* Курсор для перетаскивания */
+#flipbook.dragging {
+    cursor: grabbing;
+}
+
+#flipbook.grab {
+    cursor: grab;
+}
+
+/* Эффект тени для обложек */
+.hard {
+    background: #ccc !important;
+    color: #333;
+    font-weight: bold;
+    box-shadow: 
+        inset 0 0 10px rgba(0, 0, 0, 0.2),
+        0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+/* Стили для обложки */
+.page.cover {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.page.back-cover {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+}
+
+/* Плавная анимация перелистывания */
+.turn-page.turning {
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Эффект глубины для развернутых страниц */
+#flipbook .even.turn-page {
+    transform-origin: right center;
+}
+
+#flipbook .odd.turn-page {
+    transform-origin: left center;
+}
+
+/* Подсветка при наведении на край страницы */
+.turn-page:hover::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 80px;
+    background: linear-gradient(
+        to left,
+        rgba(255, 255, 255, 0.1) 0%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    right: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.turn-page.odd:hover::before {
+    opacity: 1;
+}
+
+.turn-page.even:hover::before {
+    right: auto;
+    left: 0;
+    background: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0.1) 0%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    opacity: 1;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+    .controls-top,
+    .controls-bottom {
+        padding: 10px 15px;
+        gap: 10px;
+    }
+    
+    .control-btn,
+    .nav-btn {
+        padding: 6px 12px;
+        font-size: 14px;
+    }
+    
+    .flipbook-wrapper {
+        padding: 15px;
+    }
+    
+    #flipbook {
+        width: 95%;
+        height: 95%;
+    }
+    
+    .thumbnails-panel {
+        width: 280px;
+    }
+}
+
+/* Анимация появления */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.flipbook-wrapper {
+    animation: fadeIn 0.5s ease-out;
+}
+
+/* Эффект переворачивания страницы - ПРОДВИНУТЫЙ */
+.turn-page.page-flip {
+    animation: pageFlip 0.8s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+@keyframes pageFlip {
+    0% {
+        transform: rotateY(0deg);
+    }
+    50% {
+        transform: rotateY(-90deg);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+    100% {
+        transform: rotateY(-180deg);
+    }
+}

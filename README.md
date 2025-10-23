@@ -1,32 +1,40 @@
-# 🎨 PPTX to HTML Converter# 🎨 PPTX to HTML Converter# 🎨 PPTX to HTML Converter
+# 🎨 PPTX to HTML Converter
 
+> Convert PowerPoint presentations to responsive HTML pages with **pixel-perfect style preservation** and **interactive FlipBook mode**.
 
-
-> Convert PowerPoint presentations to responsive HTML pages with **pixel-perfect style preservation**.
-
-
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)> A powerful Python tool that converts PowerPoint presentations (PPTX) to responsive HTML web pages with **complete style preservation**.> A powerful Python tool that converts PowerPoint presentations (PPTX) to responsive HTML web pages with **complete style preservation**.
-
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-
-
+[![PPTX](https://img.shields.io/badge/PowerPoint-PPTX-orange.svg)](https://python-pptx.readthedocs.io/)
 
 ---
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## � Что нового в v16.6?
+
+### 📖 FlipBook Magazine Mode
+Ваши презентации теперь выглядят как **интерактивные журналы**:
+
+- ✅ **Разворот страниц** - отображение по 2 страницы (как в журнале)
+- ✅ **Плавные эффекты** - увеличенная длительность анимации (1.5 сек)
+- ✅ **Загиб страниц** - реалистичный 3D эффект загнутых углов
+- ✅ **Динамические тени** - тени меняются при перелистывании
+- ✅ **Умный UI** - счетчик показывает разворот "2-3", "4-5" и т.д.
+
+```bash
+# Конвертация с FlipBook шаблоном
+python pptx_to_html.py "presentation.pptx" output --template flipbook
+```
+
+🔗 **Быстрый старт:** [FLIPBOOK_QUICKSTART.md](FLIPBOOK_QUICKSTART.md)  
+📚 **Полная документация:** [doc/PPTX_V16_6_MAGAZINE_MODE.md](doc/PPTX_V16_6_MAGAZINE_MODE.md)
+
+---
 
 ## 🎯 Why Use This Converter?
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-
 **Transform PowerPoint designs into production-ready web code automatically.**
-
-[![PPTX](https://img.shields.io/badge/PowerPoint-PPTX-orange.svg)](https://python-pptx.readthedocs.io/)[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ### Key Benefits
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
 ✅ **Save Time** - No manual HTML/CSS recreation needed  
 

@@ -1,5 +1,5 @@
 """
-PPTX to HTML Converter (v16.3)
+PPTX to HTML Converter (v16.6)
 Конвертирует презентации PowerPoint в веб-страницы с сохранением форматирования
 
 Версия 15: Улучшенная классификация изображений (QR-коды, иконки, логотипы)
@@ -7,6 +7,8 @@ PPTX to HTML Converter (v16.3)
 Версия 16.1: Исправлена логика границ и теней (удаление ложных границ)
 Версия 16.2: Исправлена прозрачность PNG изображений
 Версия 16.3: Добавлена поддержка композитных QR-кодов из групп фигур
+Версия 16.5: Добавлена поддержка FlipBook шаблона с эффектом перелистывания страниц
+Версия 16.6: FlipBook - режим журнала с разворотами, плавные эффекты загиба страниц
 """
 
 from pptx import Presentation
@@ -1895,18 +1897,61 @@ body {{
         }
         
         for slide in self.slide_data:
-            metadata['slides'].append({
-                'slide_num': slide['slide_num'],
+            slide_num = slide['slide_num']
+            
+            # Определяем пути к ресурсам слайда
+            slide_meta = {
+                'slide_num': slide_num,
                 'width': slide['width'],
                 'height': slide['height'],
-                'shapes_count': len(slide['shapes'])
-            })
+                'shapes_count': len(slide['shapes']),
+                'html_page': 'index.html',  # Главная HTML страница со всеми слайдами
+                'html_anchor': f'#slide-{slide_num}',  # Якорь для навигации к слайду
+                'html_url': f'index.html#slide-{slide_num}'  # Полный URL к слайду
+            }
+            
+            # Добавляем информацию о фоновом изображении, если есть
+            if slide.get('background_image'):
+                slide_meta['background_image'] = slide['background_image']
+            
+            # Добавляем информацию о фоновом цвете, если есть
+            if slide.get('background_color'):
+                slide_meta['background_color'] = slide['background_color']
+            
+            metadata['slides'].append(slide_meta)
         
         metadata_path = os.path.join(self.output_dir, 'metadata.json')
         with open(metadata_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
         
         print(f"✅ Метаданные сохранены: {metadata_path}")
+
+
+def apply_flipbook_template(output_dir):
+    """Применяет FlipBook шаблон к сконвертированной презентации"""
+    import shutil
+    
+    template_dir = os.path.join(os.path.dirname(__file__), 'template')
+    
+    # Проверяем наличие шаблона
+    if not os.path.exists(template_dir):
+        print(f"❌ Папка шаблона не найдена: {template_dir}")
+        return
+    
+    # Копируем файлы шаблона
+    template_files = ['flipbook.html', 'flipbook.css', 'flipbook.js']
+    
+    for file in template_files:
+        src = os.path.join(template_dir, file)
+        dst = os.path.join(output_dir, file)
+        
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+            print(f"  ✓ Скопирован: {file}")
+        else:
+            print(f"  ⚠️  Не найден: {file}")
+    
+    print("  ✓ FlipBook шаблон применен успешно!")
 
 
 def main():
@@ -1918,15 +1963,30 @@ def main():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     
     print("=" * 60)
-    print("PPTX to HTML Converter v16.3")
+    print("PPTX to HTML Converter v16.6")
     print("Конвертер презентаций PowerPoint в веб-страницы")
-    print("v16.3: Добавлена поддержка композитных QR-кодов")
+    print("v16.6: FlipBook - режим журнала с плавными эффектами")
     print("=" * 60)
     print()
     
+    # Парсим аргументы командной строки
+    template_mode = None
+    pptx_file = None
+    output_dir = None
+    
+    # Проверяем наличие --template флага
+    args = sys.argv[1:]
+    if '--template' in args:
+        template_idx = args.index('--template')
+        if template_idx + 1 < len(args):
+            template_mode = args[template_idx + 1]
+            # Удаляем --template и его значение из args
+            args.pop(template_idx)  # удаляем --template
+            args.pop(template_idx)  # удаляем значение
+    
     # Получаем путь к файлу
-    if len(sys.argv) > 1:
-        pptx_file = sys.argv[1]
+    if len(args) > 0:
+        pptx_file = args[0]
     else:
         pptx_file = input("Введите путь к PPTX файлу: ").strip().strip('"')
     
@@ -1939,12 +1999,19 @@ def main():
         return
     
     # Получаем папку вывода
-    if len(sys.argv) > 2:
-        output_dir = sys.argv[2]
+    if len(args) > 1:
+        output_dir = args[1]
     else:
         output_dir = input("Папка для сохранения (Enter = 'pptx_output'): ").strip()
         if not output_dir:
             output_dir = 'pptx_output'
+    
+    # Проверяем шаблон
+    if template_mode:
+        print(f"📐 Используется шаблон: {template_mode}")
+        if template_mode not in ['flipbook', 'default']:
+            print(f"⚠️  Неизвестный шаблон '{template_mode}', используется стандартный")
+            template_mode = None
     
     print()
     print("🚀 Начинаем конвертацию...")
@@ -1954,16 +2021,28 @@ def main():
         converter = PPTXToHTMLConverter(pptx_file, output_dir)
         converter.convert()
         
+        # Применяем шаблон если указан
+        if template_mode == 'flipbook':
+            print()
+            print("📐 Применяем FlipBook шаблон...")
+            apply_flipbook_template(output_dir)
+        
         print()
         print("=" * 60)
         print("✨ Готово! Презентация успешно конвертирована!")
         print("=" * 60)
         print()
         print("📝 Инструкции:")
-        print(f"   1. Откройте: {os.path.join(output_dir, 'index.html')}")
-        print("   2. Используйте стрелки ← → для навигации")
-        print("   3. Нажмите F11 для полноэкранного режима")
-        print("   4. Нажмите 📑 для просмотра миниатюр")
+        if template_mode == 'flipbook':
+            print(f"   1. Откройте: {os.path.join(output_dir, 'flipbook.html')}")
+            print("   2. Используйте мышь для перелистывания страниц")
+            print("   3. Нажмите F11 для полноэкранного режима")
+            print("   4. Нажмите 📑 для просмотра миниатюр")
+        else:
+            print(f"   1. Откройте: {os.path.join(output_dir, 'index.html')}")
+            print("   2. Используйте стрелки ← → для навигации")
+            print("   3. Нажмите F11 для полноэкранного режима")
+            print("   4. Нажмите 📑 для просмотра миниатюр")
         print()
         
     except Exception as e:

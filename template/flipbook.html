@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Презентация - FlipBook</title>
+    <link rel="stylesheet" href="flipbook.css">
+    <!-- Turn.js библиотека для эффекта перелистывания -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/turn.js/3/turn.min.js"></script>
+</head>
+<body>
+    <div class="flipbook-container">
+        <!-- Скрытые элементы для JavaScript -->
+        <div style="display: none;">
+            <span id="current-page">1</span>
+            <span id="total-pages">1</span>
+            <button id="zoom-in"></button>
+            <button id="zoom-out"></button>
+            <button id="fullscreen"></button>
+            <button id="thumbnails-btn"></button>
+        </div>
+        
+        <!-- Контейнер для flipbook -->
+        <div class="flipbook-wrapper">
+            <div id="flipbook">
+                <!-- Страницы будут добавлены динамически -->
+            </div>
+        </div>
+
+        <!-- Нижняя панель управления -->
+        <div class="controls-bottom">
+            <button id="first-page" class="nav-btn" title="Первая страница">⏮</button>
+            <button id="prev-page" class="nav-btn" title="Предыдущая">◀</button>
+            <input type="range" id="page-slider" min="1" max="1" value="1" class="page-slider">
+            <button id="next-page" class="nav-btn" title="Следующая">▶</button>
+            <button id="last-page" class="nav-btn" title="Последняя страница">⏭</button>
+        </div>
+
+        <!-- Панель миниатюр -->
+        <div id="thumbnails-panel" class="thumbnails-panel">
+            <div class="thumbnails-header">
+                <h3>Миниатюры</h3>
+                <button id="close-thumbnails">✕</button>
+            </div>
+            <div id="thumbnails-grid" class="thumbnails-grid">
+                <!-- Миниатюры будут добавлены динамически -->
+            </div>
+        </div>
+    </div>
+
+    <script src="flipbook.js"></script>
+</body>
+</html>
