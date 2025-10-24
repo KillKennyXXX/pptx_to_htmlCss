@@ -1,6 +1,6 @@
 # 🎨 PPTX to HTML Converter
 
-> Convert PowerPoint presentations to responsive HTML pages with **pixel-perfect style preservation** and **interactive FlipBook mode**.
+> Convert PowerPoint presentations to responsive HTML pages with **pixel-perfect style preservation** and **professional TurnJS flipbook**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -8,7 +8,33 @@
 
 ---
 
-## � Что нового в v16.6?
+## 🆕 Что нового в v17.0?
+
+### 📖 TurnJS Professional Integration
+Ваши презентации теперь выглядят как **профессиональные интерактивные журналы**:
+
+- ✅ **TurnJS библиотека** - профессиональный эффект перелистывания страниц
+- ✅ **Автоматическая конвертация** - PPTX → HTML → JPG изображения
+- ✅ **Zoom функция** - клик по странице для увеличения
+- ✅ **Интерактивные миниатюры** - быстрая навигация по страницам
+- ✅ **Адаптивный дизайн** - поддержка десктоп и мобильных устройств
+- ✅ **Реалистичные эффекты** - 3D загиб, тени, плавные анимации
+
+```bash
+# Конвертация с TurnJS шаблоном (по умолчанию)
+python pptx_to_html.py "presentation.pptx" output
+
+# Простой HTML слайдер
+python pptx_to_html.py "presentation.pptx" output --template default
+```
+
+🔗 **Быстрый старт:** [TURNJS_QUICKSTART.md](TURNJS_QUICKSTART.md)  
+📚 **Полная документация:** [TURNJS_INTEGRATION.md](TURNJS_INTEGRATION.md)  
+📊 **Отчет об интеграции:** [TURNJS_INTEGRATION_REPORT.md](TURNJS_INTEGRATION_REPORT.md)
+
+---
+
+## 📢 Что было в v16.6?
 
 ### 📖 FlipBook Magazine Mode
 Ваши презентации теперь выглядят как **интерактивные журналы**:

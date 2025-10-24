@@ -1,5 +1,5 @@
 """
-PPTX to HTML Converter (v16.6)
+PPTX to HTML Converter (v17.1)
 Конвертирует презентации PowerPoint в веб-страницы с сохранением форматирования
 
 Версия 15: Улучшенная классификация изображений (QR-коды, иконки, логотипы)
@@ -9,6 +9,8 @@ PPTX to HTML Converter (v16.6)
 Версия 16.3: Добавлена поддержка композитных QR-кодов из групп фигур
 Версия 16.5: Добавлена поддержка FlipBook шаблона с эффектом перелистывания страниц
 Версия 16.6: FlipBook - режим журнала с разворотами, плавные эффекты загиба страниц
+Версия 17.0: Интеграция с TurnJS (template_new) - профессиональный эффект перелистывания страниц
+Версия 17.1: TurnJS теперь использует HTML страницы вместо изображений для каждого слайда
 """
 
 from pptx import Presentation
@@ -1217,6 +1219,207 @@ class PPTXToHTMLConverter:
         print(f"📁 Результаты сохранены в: {self.output_dir}")
         print(f"🌐 Откройте: {os.path.join(self.output_dir, 'index.html')}")
     
+    def generate_individual_slide_html(self, slide_data, output_file):
+        """Генерирует отдельный HTML файл для одного слайда"""
+        html_parts = []
+        
+        slide_num = slide_data['slide_num']
+        aspect_ratio = slide_data['aspect_ratio']
+        
+        # Стили фона
+        bg_styles = []
+        if slide_data.get('background'):
+            bg_styles.append(f"background-color: {slide_data['background']}")
+        
+        if slide_data.get('background_image'):
+            bg_styles.append(f"background-image: url('../{slide_data['background_image']}')")
+            bg_styles.append("background-size: cover")
+            bg_styles.append("background-position: center")
+            bg_styles.append("background-repeat: no-repeat")
+        
+        bg_style = '; '.join(bg_styles)
+        
+        # Header
+        html_parts.append(f'''<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Слайд {slide_num}</title>
+    <link rel="stylesheet" href="../style.css">
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }}
+        .slide {{
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }}
+    </style>
+</head>
+<body>
+    <div class="slide" id="slide{slide_num}" data-slide="{slide_num}" data-aspect="{aspect_ratio:.4f}" style="{bg_style}">
+''')
+        
+        # Фигуры на слайде
+        for shape in slide_data['shapes']:
+            style_str = '; '.join([f"{k}: {v}" for k, v in shape['style'].items()])
+            
+            if shape['type'] == 'text':
+                html_parts.append(f'''
+        <div class="text-block" style="{style_str}">
+            {shape['content']}
+        </div>
+''')
+            elif shape['type'] == 'qr-group':
+                # v16.3: Композитный QR-код из группы фигур
+                parts = shape.get('parts', [])
+                group_bounds = shape.get('group_bounds', {})
+                
+                # Создаем контейнер для композитного QR
+                html_parts.append(f'''
+        <div class="qr-group-block" style="{style_str}; overflow: visible;">
+''')
+                
+                # Рендерим каждую часть группы
+                for part in parts:
+                    # Вычисляем относительную позицию внутри группы
+                    rel_left = ((part['left'] - group_bounds['left']) / group_bounds['width']) * 100
+                    rel_top = ((part['top'] - group_bounds['top']) / group_bounds['height']) * 100
+                    rel_width = (part['width'] / group_bounds['width']) * 100
+                    rel_height = (part['height'] / group_bounds['height']) * 100
+                    
+                    part_style = f"position: absolute; left: {rel_left:.3f}%; top: {rel_top:.3f}%; width: {rel_width:.3f}%; height: {rel_height:.3f}%;"
+                    
+                    if part['type'] == MSO_SHAPE_TYPE.FREEFORM:
+                        # FREEFORM - отрисовываем как цветной прямоугольник
+                        fill_color = part.get('fill_color', 'transparent')
+                        html_parts.append(f'''
+            <div class="qr-part qr-freeform" style="{part_style} background-color: {fill_color};"></div>
+''')
+                    elif part['type'] == MSO_SHAPE_TYPE.PICTURE:
+                        # PICTURE - отрисовываем как изображение
+                        img_path = part.get('image_path')
+                        if img_path:
+                            html_parts.append(f'''
+            <div class="qr-part qr-picture" style="{part_style}">
+                <img src="../{img_path}" alt="QR Part" style="width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;">
+            </div>
+''')
+                
+                html_parts.append('''
+        </div>
+''')
+            elif shape['type'] == 'image':
+                # v15: Рендеринг по типу изображения
+                img_type = shape.get('image_type', 'unknown')
+                actual_w, actual_h = shape.get('actual_size', (0, 0))
+                
+                if img_type == 'qr-code':
+                    # QR-коды: фактический размер, без масштабирования, резкость
+                    html_parts.append(f'''
+        <div class="image-block qr-code" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+            <img src="../{shape['content']}" alt="QR Code" style="width: {actual_w}px; height: {actual_h}px; object-fit: none; image-rendering: pixelated;">
+        </div>
+''')
+                elif img_type == 'icon':
+                    # Иконки: пропорциональное масштабирование, центрирование
+                    html_parts.append(f'''
+        <div class="image-block icon" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+            <img src="../{shape['content']}" alt="Icon" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+        </div>
+''')
+                elif img_type == 'logo':
+                    # Логотипы: сохранение пропорций, без растяжения
+                    html_parts.append(f'''
+        <div class="image-block logo" style="{style_str}">
+            <img src="../{shape['content']}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain;">
+        </div>
+''')
+                elif img_type == 'diagram':
+                    # Диаграммы: contain для сохранения читаемости
+                    html_parts.append(f'''
+        <div class="image-block diagram" style="{style_str}">
+            <img src="../{shape['content']}" alt="Diagram" style="width: 100%; height: 100%; object-fit: contain;">
+        </div>
+''')
+                else:
+                    # Фото и неизвестные: стандартный рендеринг
+                    if shape.get('is_small', False) and actual_w > 0:
+                        html_parts.append(f'''
+        <div class="image-block" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+            <img src="../{shape['content']}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
+        </div>
+''')
+                    else:
+                        html_parts.append(f'''
+        <div class="image-block" style="{style_str}">
+            <img src="../{shape['content']}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
+        </div>
+''')
+            elif shape['type'] == 'table':
+                html_parts.append(f'''
+        <div class="table-block" style="{style_str}">
+            {shape['content']}
+        </div>
+''')
+            elif shape['type'] == 'group':
+                # Группа - контейнер с дочерними элементами
+                html_parts.append(f'''
+        <div class="group-block" style="{style_str}">
+''')
+                # Обрабатываем дочерние фигуры группы
+                for sub_shape in shape['content']:
+                    sub_style_str = '; '.join([f"{k}: {v}" for k, v in sub_shape['style'].items()])
+                    
+                    if sub_shape['type'] == 'shape':
+                        html_parts.append(f'''
+            <div class="shape-block" style="{sub_style_str}"></div>
+''')
+                    elif sub_shape['type'] == 'image':
+                        # Проверяем маленькие изображения
+                        if sub_shape.get('is_small', False) and 'actual_size' in sub_shape:
+                            actual_w, actual_h = sub_shape['actual_size']
+                            html_parts.append(f'''
+            <div class="image-block" style="{sub_style_str}; display: flex; align-items: center; justify-content: center;">
+                <img src="../{sub_shape['content']}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
+            </div>
+''')
+                        else:
+                            html_parts.append(f'''
+            <div class="image-block" style="{sub_style_str}">
+                <img src="../{sub_shape['content']}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
+            </div>
+''')
+                    elif sub_shape['type'] == 'text':
+                        html_parts.append(f'''
+            <div class="text-block" style="{sub_style_str}">
+                {sub_shape['content']}
+            </div>
+''')
+                
+                html_parts.append('''        </div>
+''')
+            elif shape['type'] == 'shape':
+                html_parts.append(f'''
+        <div class="shape-block" style="{style_str}">
+            <p>{shape['content']}</p>
+        </div>
+''')
+        
+        # Footer
+        html_parts.append('''    </div>
+</body>
+</html>
+''')
+        
+        # Сохранение файла
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(''.join(html_parts))
+    
     def generate_html(self):
         """Генерирует HTML файл"""
         html_parts = []
@@ -1954,6 +2157,469 @@ def apply_flipbook_template(output_dir):
     print("  ✓ FlipBook шаблон применен успешно!")
 
 
+def generate_slide_pages_html(output_dir, slide_data_list):
+    """
+    Генерирует отдельные HTML страницы для каждого слайда для TurnJS
+    Вместо конвертации в изображения, создает HTML файлы
+    """
+    print("  📄 Генерируем HTML страницы слайдов...")
+    
+    pages_dir = os.path.join(output_dir, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+    
+    num_slides = len(slide_data_list)
+    print(f"  📝 Создаем {num_slides} HTML страниц...")
+    
+    for idx, slide_data in enumerate(slide_data_list, 1):
+        # Создаем HTML файл для каждого слайда
+        page_file = os.path.join(pages_dir, f'{idx}.html')
+        
+        html_parts = []
+        slide_num = slide_data['slide_num']
+        aspect_ratio = slide_data['aspect_ratio']
+        
+        # Стили фона
+        bg_styles = []
+        if slide_data.get('background'):
+            bg_styles.append(f"background-color: {slide_data['background']}")
+        
+        if slide_data.get('background_image'):
+            bg_styles.append(f"background-image: url('../{slide_data['background_image']}')")
+            bg_styles.append("background-size: cover")
+            bg_styles.append("background-position: center")
+            bg_styles.append("background-repeat: no-repeat")
+        
+        bg_style = '; '.join(bg_styles)
+        
+        # Header
+        html_parts.append(f'''<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Слайд {slide_num}</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+        }}
+        .slide {{
+            width: 461px;
+            height: 600px;
+            position: relative;
+            margin: 0;
+            background: white;
+        }}
+        /* Стили для текстовых блоков */
+        .text-block {{
+            overflow: visible;
+        }}
+        .text-block p {{
+            margin: 0;
+        }}
+        /* Стили для изображений */
+        .image-block img {{
+            display: block;
+        }}
+        /* Стили для таблиц */
+        .table-block table {{
+            border-collapse: collapse;
+            width: 100%;
+            height: 100%;
+        }}
+        .table-block td {{
+            vertical-align: top;
+            padding: 5px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="slide" id="slide{slide_num}" data-slide="{slide_num}" data-aspect="{aspect_ratio:.4f}" style="{bg_style}">
+''')
+        
+        # Фигуры на слайде
+        for shape in slide_data['shapes']:
+            style_str = '; '.join([f"{k}: {v}" for k, v in shape['style'].items()])
+            
+            if shape['type'] == 'text':
+                html_parts.append(f'''
+        <div class="text-block" style="{style_str}">
+            {shape['content']}
+        </div>
+''')
+            elif shape['type'] == 'qr-group':
+                # v16.3: Композитный QR-код из группы фигур
+                parts = shape.get('parts', [])
+                group_bounds = shape.get('group_bounds', {})
+                
+                # Создаем контейнер для композитного QR
+                html_parts.append(f'''
+        <div class="qr-group-block" style="{style_str}; overflow: visible;">
+''')
+                
+                # Рендерим каждую часть группы
+                for part in parts:
+                    # Вычисляем относительную позицию внутри группы
+                    rel_left = ((part['left'] - group_bounds['left']) / group_bounds['width']) * 100
+                    rel_top = ((part['top'] - group_bounds['top']) / group_bounds['height']) * 100
+                    rel_width = (part['width'] / group_bounds['width']) * 100
+                    rel_height = (part['height'] / group_bounds['height']) * 100
+                    
+                    part_style = f"position: absolute; left: {rel_left:.3f}%; top: {rel_top:.3f}%; width: {rel_width:.3f}%; height: {rel_height:.3f}%;"
+                    
+                    if part['type'] == MSO_SHAPE_TYPE.FREEFORM:
+                        # FREEFORM - отрисовываем как цветной прямоугольник
+                        fill_color = part.get('fill_color', 'transparent')
+                        html_parts.append(f'''
+            <div class="qr-part qr-freeform" style="{part_style} background-color: {fill_color};"></div>
+''')
+                    elif part['type'] == MSO_SHAPE_TYPE.PICTURE:
+                        # PICTURE - отрисовываем как изображение
+                        img_path = part.get('image_path')
+                        if img_path:
+                            html_parts.append(f'''
+            <div class="qr-part qr-picture" style="{part_style}">
+                <img src="../{img_path}" alt="QR Part" style="width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;">
+            </div>
+''')
+                
+                html_parts.append('''
+        </div>
+''')
+            elif shape['type'] == 'image':
+                # v15: Рендеринг по типу изображения
+                img_type = shape.get('image_type', 'unknown')
+                actual_w, actual_h = shape.get('actual_size', (0, 0))
+                img_content = shape['content'].replace('images/', '../images/') if 'images/' in shape['content'] else f"../{shape['content']}"
+                
+                if img_type == 'qr-code':
+                    html_parts.append(f'''
+        <div class="image-block qr-code" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+            <img src="{img_content}" alt="QR Code" style="width: {actual_w}px; height: {actual_h}px; object-fit: none; image-rendering: pixelated;">
+        </div>
+''')
+                elif img_type == 'icon':
+                    html_parts.append(f'''
+        <div class="image-block icon" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+            <img src="{img_content}" alt="Icon" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+        </div>
+''')
+                elif img_type == 'logo':
+                    html_parts.append(f'''
+        <div class="image-block logo" style="{style_str}">
+            <img src="{img_content}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain;">
+        </div>
+''')
+                elif img_type == 'diagram':
+                    html_parts.append(f'''
+        <div class="image-block diagram" style="{style_str}">
+            <img src="{img_content}" alt="Diagram" style="width: 100%; height: 100%; object-fit: contain;">
+        </div>
+''')
+                else:
+                    if shape.get('is_small', False) and actual_w > 0:
+                        html_parts.append(f'''
+        <div class="image-block" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+            <img src="{img_content}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
+        </div>
+''')
+                    else:
+                        html_parts.append(f'''
+        <div class="image-block" style="{style_str}">
+            <img src="{img_content}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
+        </div>
+''')
+            elif shape['type'] == 'table':
+                html_parts.append(f'''
+        <div class="table-block" style="{style_str}">
+            {shape['content']}
+        </div>
+''')
+            elif shape['type'] == 'group':
+                html_parts.append(f'''
+        <div class="group-block" style="{style_str}">
+''')
+                for sub_shape in shape['content']:
+                    sub_style_str = '; '.join([f"{k}: {v}" for k, v in sub_shape['style'].items()])
+                    
+                    if sub_shape['type'] == 'shape':
+                        html_parts.append(f'''
+            <div class="shape-block" style="{sub_style_str}"></div>
+''')
+                    elif sub_shape['type'] == 'image':
+                        sub_img_content = sub_shape['content'].replace('images/', '../images/') if 'images/' in sub_shape['content'] else f"../{sub_shape['content']}"
+                        if sub_shape.get('is_small', False) and 'actual_size' in sub_shape:
+                            actual_w, actual_h = sub_shape['actual_size']
+                            html_parts.append(f'''
+            <div class="image-block" style="{sub_style_str}; display: flex; align-items: center; justify-content: center;">
+                <img src="{sub_img_content}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
+            </div>
+''')
+                        else:
+                            html_parts.append(f'''
+            <div class="image-block" style="{sub_style_str}">
+                <img src="{sub_img_content}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
+            </div>
+''')
+                    elif sub_shape['type'] == 'text':
+                        html_parts.append(f'''
+            <div class="text-block" style="{sub_style_str}">
+                {sub_shape['content']}
+            </div>
+''')
+                
+                html_parts.append('''        </div>
+''')
+            elif shape['type'] == 'shape':
+                html_parts.append(f'''
+        <div class="shape-block" style="{style_str}">
+            <p>{shape['content']}</p>
+        </div>
+''')
+        
+        # Footer
+        html_parts.append('''    </div>
+</body>
+</html>
+''')
+        
+        # Сохранение файла
+        with open(page_file, 'w', encoding='utf-8') as f:
+            f.write(''.join(html_parts))
+        
+        # Создаем пустой regions файл
+        regions_path = os.path.join(pages_dir, f'{idx}-regions.json')
+        with open(regions_path, 'w') as f:
+            json.dump([], f)
+        
+        print(f"  ✓ Страница {idx}/{num_slides}")
+    
+    print(f"  ✅ Все {num_slides} HTML страниц созданы")
+    return True
+
+
+def generate_slide_images(output_dir):
+    """
+    Генерирует изображения слайдов из HTML для TurnJS
+    Использует Playwright для рендеринга HTML в изображения
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("❌ Playwright не установлен. Установите: pip install playwright")
+        print("   После установки выполните: playwright install chromium")
+        return False
+    
+    print("  📸 Генерируем изображения слайдов...")
+    
+    index_html = os.path.join(output_dir, 'index.html')
+    if not os.path.exists(index_html):
+        print(f"❌ Файл index.html не найден: {index_html}")
+        return False
+    
+    pages_dir = os.path.join(output_dir, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+    
+    try:
+        from PIL import Image
+        PIL_AVAILABLE = True
+    except ImportError:
+        print("  ⚠️  Pillow не установлен, миниатюры будут создаваться без оптимизации")
+        PIL_AVAILABLE = False
+    
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(viewport={'width': 1920, 'height': 1080})
+            
+            # Загружаем HTML файл
+            file_url = f'file:///{os.path.abspath(index_html).replace(os.sep, "/")}'
+            page.goto(file_url, wait_until='networkidle')
+            
+            # Даем время на загрузку стилей
+            page.wait_for_timeout(1000)
+            
+            # Получаем количество слайдов
+            slides = page.query_selector_all('.slide')
+            num_slides = len(slides)
+            
+            print(f"  📄 Найдено слайдов: {num_slides}")
+            
+            if num_slides == 0:
+                print("  ❌ Слайды не найдены в HTML")
+                browser.close()
+                return False
+            
+            # Рендерим каждый слайд
+            for idx in range(num_slides):
+                slide = slides[idx]
+                
+                # Получаем размеры слайда
+                bbox = slide.bounding_box()
+                if not bbox:
+                    print(f"  ⚠️  Не удалось получить размеры слайда {idx+1}")
+                    continue
+                
+                # Обычное изображение (для отображения в flipbook)
+                img_path = os.path.join(pages_dir, f'{idx+1}.jpg')
+                slide.screenshot(path=img_path, type='jpeg', quality=90)
+                
+                # Создаем миниатюру
+                thumb_path = os.path.join(pages_dir, f'{idx+1}-thumb.jpg')
+                if PIL_AVAILABLE:
+                    # Создаем миниатюру с правильным размером
+                    with Image.open(img_path) as img:
+                        # Вычисляем размеры с сохранением пропорций
+                        # Целевой размер: 76x100
+                        img.thumbnail((76, 100), Image.Resampling.LANCZOS)
+                        img.save(thumb_path, 'JPEG', quality=70)
+                else:
+                    # Просто копируем основное изображение
+                    import shutil
+                    shutil.copy(img_path, thumb_path)
+                
+                # Большое изображение для зума (увеличенное качество)
+                large_path = os.path.join(pages_dir, f'{idx+1}-large.jpg')
+                slide.screenshot(path=large_path, type='jpeg', quality=95)
+                
+                # Создаем пустой regions файл (для интерактивных областей)
+                regions_path = os.path.join(pages_dir, f'{idx+1}-regions.json')
+                with open(regions_path, 'w') as f:
+                    json.dump([], f)
+                
+                print(f"  ✓ Слайд {idx+1}/{num_slides}")
+            
+            browser.close()
+            print(f"  ✅ Все {num_slides} слайдов сконвертированы в изображения")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Ошибка при генерации изображений: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+
+def apply_turnjs_template(output_dir, num_slides):
+    """Применяет TurnJS шаблон (template_new) к сконвертированной презентации"""
+    import shutil
+    
+    template_dir = os.path.join(os.path.dirname(__file__), 'template_new')
+    
+    # Проверяем наличие шаблона
+    if not os.path.exists(template_dir):
+        print(f"❌ Папка шаблона не найдена: {template_dir}")
+        return False
+    
+    # Создаем папки в output_dir
+    pages_dir = os.path.join(output_dir, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+    
+    # Копируем CSS папку
+    src_css = os.path.join(template_dir, 'css')
+    dst_css = os.path.join(output_dir, 'css')
+    if os.path.exists(src_css):
+        shutil.copytree(src_css, dst_css, dirs_exist_ok=True)
+        print(f"  ✓ Скопирована папка: css")
+    
+    # Копируем JS папку
+    src_js = os.path.join(template_dir, 'js')
+    dst_js = os.path.join(output_dir, 'js')
+    if os.path.exists(src_js):
+        shutil.copytree(src_js, dst_js, dirs_exist_ok=True)
+        print(f"  ✓ Скопирована папка: js")
+    
+    # Копируем PICS папку
+    src_pics = os.path.join(template_dir, 'pics')
+    dst_pics = os.path.join(output_dir, 'pics')
+    if os.path.exists(src_pics):
+        shutil.copytree(src_pics, dst_pics, dirs_exist_ok=True)
+        print(f"  ✓ Скопирована папка: pics")
+    
+    # Создаем index.html на основе шаблона
+    template_html_path = os.path.join(template_dir, 'index.html')
+    if not os.path.exists(template_html_path):
+        print(f"❌ Файл шаблона не найден: {template_html_path}")
+        return False
+    
+    # Читаем шаблон
+    with open(template_html_path, 'r', encoding='utf-8') as f:
+        template_content = f.read()
+    
+    # Генерируем HTML для миниатюр
+    thumbnails_html = generate_thumbnails_html(num_slides)
+    
+    # Заменяем секцию миниатюр в шаблоне
+    # Ищем секцию <div class="thumbnails">...</div> и заменяем её содержимое
+    import re
+    pattern = r'(<div class="thumbnails">)(.*?)(</div>\s*</div>)'
+    replacement = r'\1' + thumbnails_html + r'\3'
+    modified_content = re.sub(pattern, replacement, template_content, flags=re.DOTALL)
+    
+    # Заменяем количество страниц
+    modified_content = modified_content.replace('pages: 12,', f'pages: {num_slides},')
+    
+    # Сохраняем модифицированный index.html
+    output_html_path = os.path.join(output_dir, 'index.html')
+    with open(output_html_path, 'w', encoding='utf-8') as f:
+        f.write(modified_content)
+    
+    print(f"  ✓ Создан index.html с {num_slides} слайдами")
+    print("  ✓ TurnJS шаблон применен успешно!")
+    return True
+
+
+def generate_thumbnails_html(num_slides):
+    """Генерирует HTML для миниатюр страниц"""
+    html_parts = []
+    html_parts.append('\n\t<div>\n\t\t<ul>')
+    
+    # Первая страница (одиночная)
+    html_parts.append(f'''
+\t\t\t<li class="i">
+\t\t\t\t<img src="pages/1-thumb.jpg" width="76" height="100" class="page-1">
+\t\t\t\t<span>1</span>
+\t\t\t</li>''')
+    
+    # Развороты (по 2 страницы)
+    for i in range(2, num_slides, 2):
+        if i + 1 <= num_slides:
+            html_parts.append(f'''
+\t\t\t<li class="d">
+\t\t\t\t<img src="pages/{i}-thumb.jpg" width="76" height="100" class="page-{i}">
+\t\t\t\t<img src="pages/{i+1}-thumb.jpg" width="76" height="100" class="page-{i+1}">
+\t\t\t\t<span>{i}-{i+1}</span>
+\t\t\t</li>''')
+        else:
+            # Последняя страница (одиночная)
+            html_parts.append(f'''
+\t\t\t<li class="i">
+\t\t\t\t<img src="pages/{i}-thumb.jpg" width="76" height="100" class="page-{i}">
+\t\t\t\t<span>{i}</span>
+\t\t\t</li>''')
+    
+    # Если последняя страница четная и нужно добавить как одиночную
+    if num_slides > 1 and num_slides % 2 == 0:
+        html_parts.append(f'''
+\t\t\t<li class="i">
+\t\t\t\t<img src="pages/{num_slides}-thumb.jpg" width="76" height="100" class="page-{num_slides}">
+\t\t\t\t<span>{num_slides}</span>
+\t\t\t</li>''')
+    
+    html_parts.append('\n\t\t<ul>\n\t<div>\t')
+    return ''.join(html_parts)
+
+
 def main():
     """Главная функция"""
     import sys
@@ -1963,14 +2629,14 @@ def main():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     
     print("=" * 60)
-    print("PPTX to HTML Converter v16.6")
+    print("PPTX to HTML Converter v17.1")
     print("Конвертер презентаций PowerPoint в веб-страницы")
-    print("v16.6: FlipBook - режим журнала с плавными эффектами")
+    print("v17.1: TurnJS с HTML страницами вместо изображений")
     print("=" * 60)
     print()
     
     # Парсим аргументы командной строки
-    template_mode = None
+    template_mode = 'turnjs'  # По умолчанию используем TurnJS
     pptx_file = None
     output_dir = None
     
@@ -2009,9 +2675,9 @@ def main():
     # Проверяем шаблон
     if template_mode:
         print(f"📐 Используется шаблон: {template_mode}")
-        if template_mode not in ['flipbook', 'default']:
-            print(f"⚠️  Неизвестный шаблон '{template_mode}', используется стандартный")
-            template_mode = None
+        if template_mode not in ['turnjs', 'default']:
+            print(f"⚠️  Неизвестный шаблон '{template_mode}', используется TurnJS")
+            template_mode = 'turnjs'
     
     print()
     print("🚀 Начинаем конвертацию...")
@@ -2021,11 +2687,23 @@ def main():
         converter = PPTXToHTMLConverter(pptx_file, output_dir)
         converter.convert()
         
-        # Применяем шаблон если указан
-        if template_mode == 'flipbook':
+        # Применяем шаблон TurnJS
+        if template_mode == 'turnjs':
             print()
-            print("📐 Применяем FlipBook шаблон...")
-            apply_flipbook_template(output_dir)
+            print("📐 Применяем TurnJS шаблон...")
+            
+            # Генерируем HTML страницы слайдов (вместо изображений)
+            if generate_slide_pages_html(output_dir, converter.slide_data):
+                # Получаем количество слайдов
+                num_slides = len(converter.slide_data)
+                
+                # Применяем шаблон
+                if apply_turnjs_template(output_dir, num_slides):
+                    print("  ✅ TurnJS шаблон успешно применен!")
+                else:
+                    print("  ❌ Ошибка применения TurnJS шаблона")
+            else:
+                print("  ❌ Ошибка генерации HTML страниц слайдов")
         
         print()
         print("=" * 60)
@@ -2033,16 +2711,16 @@ def main():
         print("=" * 60)
         print()
         print("📝 Инструкции:")
-        if template_mode == 'flipbook':
-            print(f"   1. Откройте: {os.path.join(output_dir, 'flipbook.html')}")
+        if template_mode == 'turnjs':
+            print(f"   1. Откройте: {os.path.join(output_dir, 'index.html')}")
             print("   2. Используйте мышь для перелистывания страниц")
-            print("   3. Нажмите F11 для полноэкранного режима")
-            print("   4. Нажмите 📑 для просмотра миниатюр")
+            print("   3. Нажмите страницу для увеличения")
+            print("   4. Используйте миниатюры внизу для быстрой навигации")
+            print("   5. Клавиши ← → для перелистывания")
         else:
             print(f"   1. Откройте: {os.path.join(output_dir, 'index.html')}")
             print("   2. Используйте стрелки ← → для навигации")
             print("   3. Нажмите F11 для полноэкранного режима")
-            print("   4. Нажмите 📑 для просмотра миниатюр")
         print()
         
     except Exception as e:
