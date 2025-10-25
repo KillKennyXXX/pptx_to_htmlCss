@@ -1,5 +1,5 @@
 """
-PPTX to HTML Converter (v16.6)
+PPTX to HTML Converter (v17.0)
 Конвертирует презентации PowerPoint в веб-страницы с сохранением форматирования
 
 Версия 15: Улучшенная классификация изображений (QR-коды, иконки, логотипы)
@@ -7,8 +7,7 @@ PPTX to HTML Converter (v16.6)
 Версия 16.1: Исправлена логика границ и теней (удаление ложных границ)
 Версия 16.2: Исправлена прозрачность PNG изображений
 Версия 16.3: Добавлена поддержка композитных QR-кодов из групп фигур
-Версия 16.5: Добавлена поддержка FlipBook шаблона с эффектом перелистывания страниц
-Версия 16.6: FlipBook - режим журнала с разворотами, плавные эффекты загиба страниц
+Версия 17.0: Каждый слайд сохраняется в отдельный HTML файл (папка pages/)
 """
 
 from pptx import Presentation
@@ -42,6 +41,7 @@ class PPTXToHTMLConverter:
         self.pptx_path = pptx_path
         self.output_dir = output_dir
         self.images_dir = os.path.join(output_dir, 'images')
+        self.pages_dir = os.path.join(output_dir, 'pages')
         self.prs = None
         self.slide_data = []
         self.current_slide_bg_color = None  # Для определения дефолтного цвета текста
@@ -52,6 +52,7 @@ class PPTXToHTMLConverter:
         # Создаем директории
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
+        os.makedirs(self.pages_dir, exist_ok=True)
     
     def load_presentation(self):
         """Загружает презентацию"""
@@ -1218,298 +1219,365 @@ class PPTXToHTMLConverter:
         print(f"🌐 Откройте: {os.path.join(self.output_dir, 'index.html')}")
     
     def generate_html(self):
-        """Генерирует HTML файл"""
+        """Генерирует HTML файлы - отдельный файл для каждого слайда"""
+        
+        # Генерируем отдельную страницу для каждого слайда
+        for slide_data in self.slide_data:
+            self._generate_slide_page(slide_data)
+        
+        # Генерируем главную страницу index.html со списком страниц
+        self._generate_index_page()
+        
+        print(f"✅ Создано {len(self.slide_data)} HTML страниц в папке pages/")
+    
+    def _generate_slide_html_content(self, slide_data):
+        """Генерирует HTML контент для одного слайда"""
+        slide_num = slide_data['slide_num']
+        aspect_ratio = slide_data['aspect_ratio']
+        total_slides = len(self.slide_data)
+        
+        # Стили фона
+        bg_styles = []
+        if slide_data.get('background'):
+            bg_styles.append(f"background-color: {slide_data['background']}")
+        
+        if slide_data.get('background_image'):
+            # Путь к изображению должен быть относительно pages/
+            bg_styles.append(f"background-image: url('../{slide_data['background_image']}')")
+            bg_styles.append("background-size: cover")
+            bg_styles.append("background-position: center")
+            bg_styles.append("background-repeat: no-repeat")
+        
+        bg_style = '; '.join(bg_styles)
+        
         html_parts = []
         
-        # Header
-        html_parts.append('''<!DOCTYPE html>
+        # Фигуры на слайде
+        for shape in slide_data['shapes']:
+            style_str = '; '.join([f"{k}: {v}" for k, v in shape['style'].items()])
+            
+            if shape['type'] == 'text':
+                html_parts.append(f'''
+                <div class="text-block" style="{style_str}">
+                    {shape['content']}
+                </div>
+''')
+            elif shape['type'] == 'qr-group':
+                # v16.3: Композитный QR-код из группы фигур
+                parts = shape.get('parts', [])
+                group_bounds = shape.get('group_bounds', {})
+                
+                html_parts.append(f'''
+                <div class="qr-group-block" style="{style_str}; overflow: visible;">
+''')
+                
+                for part in parts:
+                    rel_left = ((part['left'] - group_bounds['left']) / group_bounds['width']) * 100
+                    rel_top = ((part['top'] - group_bounds['top']) / group_bounds['height']) * 100
+                    rel_width = (part['width'] / group_bounds['width']) * 100
+                    rel_height = (part['height'] / group_bounds['height']) * 100
+                    
+                    part_style = f"position: absolute; left: {rel_left:.3f}%; top: {rel_top:.3f}%; width: {rel_width:.3f}%; height: {rel_height:.3f}%;"
+                    
+                    if part['type'] == MSO_SHAPE_TYPE.FREEFORM:
+                        fill_color = part.get('fill_color', 'transparent')
+                        html_parts.append(f'''
+                    <div class="qr-part qr-freeform" style="{part_style} background-color: {fill_color};"></div>
+''')
+                    elif part['type'] == MSO_SHAPE_TYPE.PICTURE:
+                        img_path = part.get('image_path')
+                        if img_path:
+                            # Корректируем путь для pages/
+                            img_path = '../' + img_path
+                            html_parts.append(f'''
+                    <div class="qr-part qr-picture" style="{part_style}">
+                        <img src="{img_path}" alt="QR Part" style="width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;">
+                    </div>
+''')
+                
+                html_parts.append('''
+                </div>
+''')
+            elif shape['type'] == 'image':
+                img_type = shape.get('image_type', 'unknown')
+                actual_w, actual_h = shape.get('actual_size', (0, 0))
+                # Корректируем путь к изображению для pages/
+                img_src = '../' + shape['content']
+                
+                if img_type == 'qr-code':
+                    html_parts.append(f'''
+                <div class="image-block qr-code" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+                    <img src="{img_src}" alt="QR Code" style="width: {actual_w}px; height: {actual_h}px; object-fit: none; image-rendering: pixelated;">
+                </div>
+''')
+                elif img_type == 'icon':
+                    html_parts.append(f'''
+                <div class="image-block icon" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+                    <img src="{img_src}" alt="Icon" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+                </div>
+''')
+                elif img_type == 'logo':
+                    html_parts.append(f'''
+                <div class="image-block logo" style="{style_str}">
+                    <img src="{img_src}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain;">
+                </div>
+''')
+                elif img_type == 'diagram':
+                    html_parts.append(f'''
+                <div class="image-block diagram" style="{style_str}">
+                    <img src="{img_src}" alt="Diagram" style="width: 100%; height: 100%; object-fit: contain;">
+                </div>
+''')
+                else:
+                    if shape.get('is_small', False) and actual_w > 0:
+                        html_parts.append(f'''
+                <div class="image-block" style="{style_str}; display: flex; align-items: center; justify-content: center;">
+                    <img src="{img_src}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
+                </div>
+''')
+                    else:
+                        html_parts.append(f'''
+                <div class="image-block" style="{style_str}">
+                    <img src="{img_src}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
+                </div>
+''')
+            elif shape['type'] == 'table':
+                html_parts.append(f'''
+                <div class="table-block" style="{style_str}">
+                    {shape['content']}
+                </div>
+''')
+            elif shape['type'] == 'group':
+                html_parts.append(f'''
+                <div class="group-block" style="{style_str}">
+''')
+                for sub_shape in shape['content']:
+                    sub_style_str = '; '.join([f"{k}: {v}" for k, v in sub_shape['style'].items()])
+                    
+                    if sub_shape['type'] == 'shape':
+                        html_parts.append(f'''
+                    <div class="shape-block" style="{sub_style_str}"></div>
+''')
+                    elif sub_shape['type'] == 'image':
+                        sub_img_src = '../' + sub_shape['content']
+                        if sub_shape.get('is_small', False) and 'actual_size' in sub_shape:
+                            actual_w, actual_h = sub_shape['actual_size']
+                            html_parts.append(f'''
+                    <div class="image-block" style="{sub_style_str}; display: flex; align-items: center; justify-content: center;">
+                        <img src="{sub_img_src}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
+                    </div>
+''')
+                        else:
+                            html_parts.append(f'''
+                    <div class="image-block" style="{sub_style_str}">
+                        <img src="{sub_img_src}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
+                    </div>
+''')
+                    elif sub_shape['type'] == 'text':
+                        html_parts.append(f'''
+                    <div class="text-block" style="{sub_style_str}">
+                        {sub_shape['content']}
+                    </div>
+''')
+                
+                html_parts.append('''                </div>
+''')
+            elif shape['type'] == 'shape':
+                html_parts.append(f'''
+                <div class="shape-block" style="{style_str}">
+                    <p>{shape['content']}</p>
+                </div>
+''')
+        
+        return ''.join(html_parts), bg_style, aspect_ratio
+    
+    def _generate_slide_page(self, slide_data):
+        """Генерирует HTML файл для одного слайда"""
+        slide_num = slide_data['slide_num']
+        total_slides = len(self.slide_data)
+        slide_width = slide_data['width']
+        slide_height = slide_data['height']
+        
+        # Получаем контент слайда
+        slide_content, bg_style, aspect_ratio = self._generate_slide_html_content(slide_data)
+        
+        # Навигация к соседним слайдам
+        prev_link = f'page{slide_num-1}.html' if slide_num > 1 else ''
+        next_link = f'page{slide_num+1}.html' if slide_num < total_slides else ''
+        
+        html = f'''<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Презентация</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Страница {slide_num}</title>
+    <link rel="stylesheet" href="../style.css">
+    <style>
+        /* Точные размеры слайда для этой страницы */
+        .slide {{
+            width: {slide_width}px;
+            height: {slide_height}px;
+            max-width: 95vw;
+            max-height: 85vh;
+        }}
+        
+        /* Адаптивное масштабирование при необходимости */
+        @media (max-width: {slide_width}px), (max-height: {slide_height}px) {{
+            .slide {{
+                width: 95vw;
+                height: calc(95vw * {aspect_ratio:.6f});
+                max-height: 85vh;
+            }}
+            
+            @supports (width: min(95vw, {slide_width}px)) {{
+                .slide {{
+                    width: min(95vw, {slide_width}px);
+                    height: min(calc(95vw * {aspect_ratio:.6f}), {slide_height}px);
+                    max-height: 85vh;
+                }}
+            }}
+        }}
+    </style>
 </head>
 <body>
     <div class="presentation-container">
         <!-- Navigation -->
         <nav class="presentation-nav">
-            <button id="prevBtn" class="nav-btn">← Назад</button>
-            <span id="slideCounter" class="slide-counter">1 / 1</span>
-            <button id="nextBtn" class="nav-btn">Вперед →</button>
+            <a href="../index.html" class="nav-btn">📋 К списку</a>
+            {f'<a href="{prev_link}" class="nav-btn">← Назад</a>' if prev_link else '<span class="nav-btn disabled">← Назад</span>'}
+            <span class="slide-counter">{slide_num} / {total_slides}</span>
+            {f'<a href="{next_link}" class="nav-btn">Вперед →</a>' if next_link else '<span class="nav-btn disabled">Вперед →</span>'}
         </nav>
         
-        <!-- Slides -->
+        <!-- Slide Content -->
         <div class="slides-wrapper">
-''')
-        
-        # Слайды
-        for slide_data in self.slide_data:
-            slide_num = slide_data['slide_num']
-            aspect_ratio = slide_data['aspect_ratio']
-            
-            # Стили фона
-            bg_styles = []
-            if slide_data.get('background'):
-                bg_styles.append(f"background-color: {slide_data['background']}")
-            
-            if slide_data.get('background_image'):
-                bg_styles.append(f"background-image: url('{slide_data['background_image']}')")
-                bg_styles.append("background-size: cover")
-                bg_styles.append("background-position: center")
-                bg_styles.append("background-repeat: no-repeat")
-            
-            bg_style = '; '.join(bg_styles)
-            
-            html_parts.append(f'''
-            <div class="slide" id="slide{slide_num}" data-slide="{slide_num}" data-aspect="{aspect_ratio:.4f}" style="{bg_style}">
-''')
-            
-            # Фигуры на слайде
-            for shape in slide_data['shapes']:
-                style_str = '; '.join([f"{k}: {v}" for k, v in shape['style'].items()])
-                
-                if shape['type'] == 'text':
-                    html_parts.append(f'''
-                <div class="text-block" style="{style_str}">
-                    {shape['content']}
-                </div>
-''')
-                elif shape['type'] == 'qr-group':
-                    # v16.3: Композитный QR-код из группы фигур
-                    parts = shape.get('parts', [])
-                    group_bounds = shape.get('group_bounds', {})
-                    
-                    # Создаем контейнер для композитного QR
-                    html_parts.append(f'''
-                <div class="qr-group-block" style="{style_str}; overflow: visible;">
-''')
-                    
-                    # Рендерим каждую часть группы
-                    for part in parts:
-                        # Вычисляем относительную позицию внутри группы
-                        rel_left = ((part['left'] - group_bounds['left']) / group_bounds['width']) * 100
-                        rel_top = ((part['top'] - group_bounds['top']) / group_bounds['height']) * 100
-                        rel_width = (part['width'] / group_bounds['width']) * 100
-                        rel_height = (part['height'] / group_bounds['height']) * 100
-                        
-                        part_style = f"position: absolute; left: {rel_left:.3f}%; top: {rel_top:.3f}%; width: {rel_width:.3f}%; height: {rel_height:.3f}%;"
-                        
-                        if part['type'] == MSO_SHAPE_TYPE.FREEFORM:
-                            # FREEFORM - отрисовываем как цветной прямоугольник
-                            fill_color = part.get('fill_color', 'transparent')
-                            html_parts.append(f'''
-                    <div class="qr-part qr-freeform" style="{part_style} background-color: {fill_color};"></div>
-''')
-                        elif part['type'] == MSO_SHAPE_TYPE.PICTURE:
-                            # PICTURE - отрисовываем как изображение
-                            img_path = part.get('image_path')
-                            if img_path:
-                                html_parts.append(f'''
-                    <div class="qr-part qr-picture" style="{part_style}">
-                        <img src="{img_path}" alt="QR Part" style="width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;">
-                    </div>
-''')
-                    
-                    html_parts.append('''
-                </div>
-''')
-                elif shape['type'] == 'image':
-                    # v15: Рендеринг по типу изображения
-                    img_type = shape.get('image_type', 'unknown')
-                    actual_w, actual_h = shape.get('actual_size', (0, 0))
-                    
-                    if img_type == 'qr-code':
-                        # QR-коды: фактический размер, без масштабирования, резкость
-                        html_parts.append(f'''
-                <div class="image-block qr-code" style="{style_str}; display: flex; align-items: center; justify-content: center;">
-                    <img src="{shape['content']}" alt="QR Code" style="width: {actual_w}px; height: {actual_h}px; object-fit: none; image-rendering: pixelated;">
-                </div>
-''')
-                    elif img_type == 'icon':
-                        # Иконки: пропорциональное масштабирование, центрирование
-                        html_parts.append(f'''
-                <div class="image-block icon" style="{style_str}; display: flex; align-items: center; justify-content: center;">
-                    <img src="{shape['content']}" alt="Icon" style="max-width: 100%; max-height: 100%; object-fit: contain;">
-                </div>
-''')
-                    elif img_type == 'logo':
-                        # Логотипы: сохранение пропорций, без растяжения
-                        html_parts.append(f'''
-                <div class="image-block logo" style="{style_str}">
-                    <img src="{shape['content']}" alt="Logo" style="width: 100%; height: 100%; object-fit: contain;">
-                </div>
-''')
-                    elif img_type == 'diagram':
-                        # Диаграммы: contain для сохранения читаемости
-                        html_parts.append(f'''
-                <div class="image-block diagram" style="{style_str}">
-                    <img src="{shape['content']}" alt="Diagram" style="width: 100%; height: 100%; object-fit: contain;">
-                </div>
-''')
-                    else:
-                        # Фото и неизвестные: стандартный рендеринг
-                        # Fallback к старой логике для обратной совместимости
-                        if shape.get('is_small', False) and actual_w > 0:
-                            html_parts.append(f'''
-                <div class="image-block" style="{style_str}; display: flex; align-items: center; justify-content: center;">
-                    <img src="{shape['content']}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
-                </div>
-''')
-                        else:
-                            html_parts.append(f'''
-                <div class="image-block" style="{style_str}">
-                    <img src="{shape['content']}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
-                </div>
-''')
-                elif shape['type'] == 'table':
-                    html_parts.append(f'''
-                <div class="table-block" style="{style_str}">
-                    {shape['content']}
-                </div>
-''')
-                elif shape['type'] == 'group':
-                    # Группа - контейнер с дочерними элементами
-                    html_parts.append(f'''
-                <div class="group-block" style="{style_str}">
-''')
-                    # Обрабатываем дочерние фигуры группы
-                    for sub_shape in shape['content']:
-                        sub_style_str = '; '.join([f"{k}: {v}" for k, v in sub_shape['style'].items()])
-                        
-                        if sub_shape['type'] == 'shape':
-                            html_parts.append(f'''
-                    <div class="shape-block" style="{sub_style_str}"></div>
-''')
-                        elif sub_shape['type'] == 'image':
-                            # Проверяем маленькие изображения
-                            if sub_shape.get('is_small', False) and 'actual_size' in sub_shape:
-                                actual_w, actual_h = sub_shape['actual_size']
-                                html_parts.append(f'''
-                    <div class="image-block" style="{sub_style_str}; display: flex; align-items: center; justify-content: center;">
-                        <img src="{sub_shape['content']}" alt="Image" style="width: {actual_w}px; height: {actual_h}px; object-fit: none;">
-                    </div>
-''')
-                            else:
-                                html_parts.append(f'''
-                    <div class="image-block" style="{sub_style_str}">
-                        <img src="{sub_shape['content']}" alt="Image" style="width: 100%; height: 100%; object-fit: contain;">
-                    </div>
-''')
-                        elif sub_shape['type'] == 'text':
-                            html_parts.append(f'''
-                    <div class="text-block" style="{sub_style_str}">
-                        {sub_shape['content']}
-                    </div>
-''')
-                    
-                    html_parts.append('''                </div>
-''')
-                elif shape['type'] == 'shape':
-                    html_parts.append(f'''
-                <div class="shape-block" style="{style_str}">
-                    <p>{shape['content']}</p>
-                </div>
-''')
-            
-            html_parts.append('            </div>\n')
-        
-        # Footer with JavaScript
-        html_parts.append('''
-        </div>
-        
-        <!-- Thumbnails -->
-        <div class="thumbnails-panel" id="thumbnailsPanel">
-            <button class="thumbnails-toggle" id="thumbnailsToggle">📑</button>
-            <div class="thumbnails-grid" id="thumbnailsGrid">
-''')
-        
-        for slide_data in self.slide_data:
-            html_parts.append(f'''
-                <div class="thumbnail" data-slide="{slide_data['slide_num']}">
-                    <span>{slide_data['slide_num']}</span>
-                </div>
-''')
-        
-        html_parts.append('''
+            <div class="slide active" data-slide="{slide_num}" data-aspect="{aspect_ratio:.4f}" data-width="{slide_width}" data-height="{slide_height}" style="{bg_style}">
+{slide_content}
             </div>
         </div>
     </div>
     
     <script>
-        // Presentation navigation
-        let currentSlide = 1;
-        const totalSlides = document.querySelectorAll('.slide').length;
-        
-        function showSlide(n) {
-            const slides = document.querySelectorAll('.slide');
-            
-            if (n > totalSlides) {
-                currentSlide = 1;
-            }
-            if (n < 1) {
-                currentSlide = totalSlides;
-            } else {
-                currentSlide = n;
-            }
-            
-            slides.forEach(slide => {
-                slide.classList.remove('active');
-            });
-            
-            slides[currentSlide - 1].classList.add('active');
-            
-            document.getElementById('slideCounter').textContent = `${currentSlide} / ${totalSlides}`;
-            
-            // Update thumbnails
-            document.querySelectorAll('.thumbnail').forEach(thumb => {
-                thumb.classList.remove('active');
-            });
-            document.querySelector(`[data-slide="${currentSlide}"]`).classList.add('active');
-        }
-        
-        // Navigation buttons
-        document.getElementById('prevBtn').addEventListener('click', () => {
-            showSlide(currentSlide - 1);
-        });
-        
-        document.getElementById('nextBtn').addEventListener('click', () => {
-            showSlide(currentSlide + 1);
-        });
-        
         // Keyboard navigation
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowLeft') {
-                showSlide(currentSlide - 1);
-            } else if (e.key === 'ArrowRight') {
-                showSlide(currentSlide + 1);
-            }
-        });
-        
-        // Thumbnail navigation
-        document.querySelectorAll('.thumbnail').forEach(thumb => {
-            thumb.addEventListener('click', () => {
-                const slideNum = parseInt(thumb.getAttribute('data-slide'));
-                showSlide(slideNum);
-            });
-        });
-        
-        // Thumbnails toggle
-        document.getElementById('thumbnailsToggle').addEventListener('click', () => {
-            document.getElementById('thumbnailsPanel').classList.toggle('open');
-        });
-        
-        // Initialize
-        showSlide(1);
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'ArrowLeft' && '{prev_link}') {{
+                window.location.href = '{prev_link}';
+            }} else if (e.key === 'ArrowRight' && '{next_link}') {{
+                window.location.href = '{next_link}';
+            }} else if (e.key === 'Escape') {{
+                window.location.href = '../index.html';
+            }}
+        }});
         
         // Fullscreen toggle
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'F11') {
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'F11') {{
                 e.preventDefault();
-                if (!document.fullscreenElement) {
+                if (!document.fullscreenElement) {{
                     document.documentElement.requestFullscreen();
-                } else {
+                }} else {{
                     document.exitFullscreen();
+                }}
+            }}
+        }});
+    </script>
+</body>
+</html>
+'''
+        
+        # Сохраняем файл
+        page_path = os.path.join(self.pages_dir, f'page{slide_num}.html')
+        with open(page_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+    
+    def _generate_index_page(self):
+        """Генерирует главную страницу index.html со списком всех слайдов"""
+        html_parts = ['''<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Презентация - Список страниц</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .page-list-container {
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        
+        .page-list-title {
+            font-size: 32px;
+            font-weight: bold;
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .page-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .page-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+        }
+        
+        .page-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 12px rgba(76, 175, 80, 0.5);
+        }
+        
+        .page-card a {
+            text-decoration: none;
+            color: #333;
+            font-size: 20px;
+            font-weight: 600;
+            display: block;
+        }
+        
+        .page-card .page-number {
+            font-size: 48px;
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-list-container">
+        <h1 class="page-list-title">📚 Список страниц презентации</h1>
+        <div class="page-grid">
+''']
+        
+        for slide_data in self.slide_data:
+            slide_num = slide_data['slide_num']
+            html_parts.append(f'''
+            <div class="page-card" onclick="window.location.href='pages/page{slide_num}.html'">
+                <div class="page-number">{slide_num}</div>
+                <a href="pages/page{slide_num}.html">Страница {slide_num}</a>
+            </div>
+''')
+        
+        html_parts.append('''
+        </div>
+    </div>
+    
+    <script>
+        // Keyboard navigation - numbers 1-9 and 0
+        document.addEventListener('keydown', (e) => {
+            const key = e.key;
+            if (key >= '1' && key <= '9') {
+                const pageNum = parseInt(key);
+                if (pageNum <= ''' + str(len(self.slide_data)) + ''') {
+                    window.location.href = `pages/page${pageNum}.html`;
                 }
             }
         });
@@ -1518,36 +1586,31 @@ class PPTXToHTMLConverter:
 </html>
 ''')
         
-        # Сохранение HTML
-        html_content = ''.join(html_parts)
-        html_path = os.path.join(self.output_dir, 'index.html')
+        index_path = os.path.join(self.output_dir, 'index.html')
+        with open(index_path, 'w', encoding='utf-8') as f:
+            f.write(''.join(html_parts))
         
-        with open(html_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        
-        print(f"✅ HTML создан: {html_path}")
+        print(f"✅ Главная страница создана: {index_path}")
     
     def generate_css(self):
         """Генерирует CSS файл"""
-        # Вычисляем средний aspect ratio слайдов
-        avg_aspect = sum(s['aspect_ratio'] for s in self.slide_data) / len(self.slide_data)
         
-        css_content = f'''/* PPTX to HTML - Generated Styles with Responsive Layout */
+        css_content = '''/* PPTX to HTML - Generated Styles with Fixed Layout */
 
-* {{
+* {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-}}
+}
 
-body {{
+body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background-color: #1a1a1a;
     color: #333;
     overflow: hidden;
-}}
+}
 
-.presentation-container {{
+.presentation-container {
     position: relative;
     width: 100vw;
     height: 100vh;
@@ -1555,10 +1618,10 @@ body {{
     flex-direction: column;
     align-items: center;
     justify-content: center;
-}}
+}
 
 /* Navigation */
-.presentation-nav {{
+.presentation-nav {
     position: fixed;
     top: 20px;
     left: 50%;
@@ -1571,9 +1634,9 @@ body {{
     border-radius: 50px;
     z-index: 1000;
     backdrop-filter: blur(10px);
-}}
+}
 
-.nav-btn {{
+.nav-btn {
     background: #4CAF50;
     color: white;
     border: none;
@@ -1583,27 +1646,40 @@ body {{
     font-size: 16px;
     font-weight: 600;
     transition: all 0.3s ease;
-}}
+    text-decoration: none;
+    display: inline-block;
+}
 
-.nav-btn:hover {{
+.nav-btn:hover {
     background: #45a049;
     transform: scale(1.05);
-}}
+}
 
-.nav-btn:active {{
+.nav-btn:active {
     transform: scale(0.95);
-}}
+}
 
-.slide-counter {{
+.nav-btn.disabled {
+    background: #666;
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.nav-btn.disabled:hover {
+    background: #666;
+    transform: none;
+}
+
+.slide-counter {
     color: white;
     font-size: 18px;
     font-weight: 600;
     min-width: 80px;
     text-align: center;
-}}
+}
 
-/* Slides - Адаптивный контейнер */
-.slides-wrapper {{
+/* Slides - точные размеры задаются inline в каждом HTML файле */
+.slides-wrapper {
     position: relative;
     display: flex;
     align-items: center;
@@ -1611,92 +1687,84 @@ body {{
     width: 100%;
     height: 100%;
     padding: 100px 20px 20px;
-}}
+}
 
-.slide {{
-    position: absolute;
-    display: none;
-    opacity: 0;
+.slide {
+    position: relative;
+    display: block;
+    opacity: 1;
     background: white;
     box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
-    transition: opacity 0.5s ease;
     transform-origin: center center;
-    
-    /* Адаптивные размеры - сохраняем пропорции */
-    width: 90vw;
-    height: calc(90vw / {avg_aspect:.4f});
-    max-height: 85vh;
-    max-width: calc(85vh * {avg_aspect:.4f});
-}}
+}
 
-.slide.active {{
+.slide.active {
     display: block;
     opacity: 1;
     animation: slideIn 0.5s ease;
-}}
+}
 
-@keyframes slideIn {{
-    from {{
+@keyframes slideIn {
+    from {
         opacity: 0;
         transform: scale(0.95);
-    }}
-    to {{
+    }
+    to {
         opacity: 1;
         transform: scale(1);
-    }}
-}}
+    }
+}
 
-/* Text blocks - используют процентные размеры */
-.text-block {{
+/* Text blocks - используют точные размеры из PPTX */
+.text-block {
     overflow: hidden;
     box-sizing: border-box;
-}}
+}
 
-.text-block p {{
+.text-block p {
     margin: 0;
     padding: 2px 0;
     word-wrap: break-word;
     overflow-wrap: break-word;
-}}
+}
 
-.text-block span {{
+.text-block span {
     white-space: pre-wrap;
-}}
+}
 
 /* Image blocks - сохраняют пропорции */
-.image-block {{
+.image-block {
     overflow: hidden;
-}}
+}
 
-.image-block img {{
+.image-block img {
     display: block;
     width: 100% !important;
     height: 100% !important;
     object-fit: contain;
-}}
+}
 
 /* Table blocks */
-.table-block {{
+.table-block {
     overflow: auto;
-    font-size: clamp(10px, 1vw, 14px);
-}}
+}
 
-.table-block table {{
+.table-block table {
     width: 100%;
     height: 100%;
-}}
+}
 
 /* Shape blocks */
-.shape-block {{
+.shape-block {
     display: flex;
     align-items: center;
     justify-content: center;
     text-align: center;
     word-wrap: break-word;
-}}
+}
 
 /* Thumbnails Panel */
-.thumbnails-panel {{
+.thumbnails-panel {
     position: fixed;
     right: -300px;
     top: 0;
@@ -1709,13 +1777,13 @@ body {{
     display: flex;
     flex-direction: column;
     padding: 80px 20px 20px;
-}}
+}
 
-.thumbnails-panel.open {{
+.thumbnails-panel.open {
     right: 0;
-}}
+}
 
-.thumbnails-toggle {{
+.thumbnails-toggle {
     position: absolute;
     left: -50px;
     top: 50%;
@@ -1728,40 +1796,40 @@ body {{
     cursor: pointer;
     font-size: 24px;
     transition: all 0.3s ease;
-}}
+}
 
-.thumbnails-toggle:hover {{
+.thumbnails-toggle:hover {
     background: rgba(0, 0, 0, 1);
     left: -55px;
-}}
+}
 
-.thumbnails-grid {{
+.thumbnails-grid {
     display: flex;
     flex-direction: column;
     gap: 15px;
     overflow-y: auto;
     padding-right: 10px;
-}}
+}
 
-.thumbnails-grid::-webkit-scrollbar {{
+.thumbnails-grid::-webkit-scrollbar {
     width: 8px;
-}}
+}
 
-.thumbnails-grid::-webkit-scrollbar-track {{
+.thumbnails-grid::-webkit-scrollbar-track {
     background: rgba(255, 255, 255, 0.1);
     border-radius: 4px;
-}}
+}
 
-.thumbnails-grid::-webkit-scrollbar-thumb {{
+.thumbnails-grid::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.3);
     border-radius: 4px;
-}}
+}
 
-.thumbnails-grid::-webkit-scrollbar-thumb:hover {{
+.thumbnails-grid::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.5);
-}}
+}
 
-.thumbnail {{
+.thumbnail {
     background: white;
     padding: 10px;
     border-radius: 8px;
@@ -1770,116 +1838,86 @@ body {{
     text-align: center;
     font-weight: 600;
     border: 3px solid transparent;
-}}
+}
 
-.thumbnail:hover {{
+.thumbnail:hover {
     transform: scale(1.05);
     border-color: #4CAF50;
-}}
+}
 
-.thumbnail.active {{
+.thumbnail.active {
     border-color: #4CAF50;
     box-shadow: 0 0 20px rgba(76, 175, 80, 0.5);
-}}
+}
 
-/* Responsive Design */
-@media (max-width: 768px) {{
-    .slides-wrapper {{
+/* Responsive Design - только для очень маленьких экранов */
+@media (max-width: 768px) {
+    .slides-wrapper {
         padding: 80px 10px 10px;
-    }}
+    }
     
-    .slide {{
-        width: 95vw;
-        height: calc(95vw / {avg_aspect:.4f});
-        max-height: 80vh;
-        max-width: calc(80vh * {avg_aspect:.4f});
-    }}
-    
-    .presentation-nav {{
+    .presentation-nav {
         padding: 10px 15px;
         gap: 10px;
-    }}
+    }
     
-    .nav-btn {{
+    .nav-btn {
         padding: 8px 15px;
         font-size: 14px;
-    }}
+    }
     
-    .thumbnails-panel {{
+    .thumbnails-panel {
         width: 200px;
         right: -200px;
-    }}
-}}
+    }
+}
 
-@media (max-width: 480px) {{
-    .slide {{
-        width: 98vw;
-        height: calc(98vw / {avg_aspect:.4f});
-        max-height: 75vh;
-        max-width: calc(75vh * {avg_aspect:.4f});
-    }}
-    
-    .presentation-nav {{
+@media (max-width: 480px) {
+    .presentation-nav {
         flex-direction: column;
         gap: 5px;
         padding: 10px;
-    }}
-    
-    .text-block {{
-        font-size: 12px;
-    }}
-}}
+    }
+}
 
 /* Print Styles */
-@media print {{
-    body {{
+@media print {
+    body {
         background: white;
-    }}
+    }
     
     .presentation-nav,
-    .thumbnails-panel {{
+    .thumbnails-panel {
         display: none;
-    }}
+    }
     
-    .slide {{
+    .slide {
         display: block !important;
         opacity: 1 !important;
         position: relative !important;
         page-break-after: always;
         box-shadow: none;
         margin: 20px auto;
-        width: 100%;
-        height: auto;
-        max-width: none;
-        max-height: none;
-    }}
-}}
+    }
+}
 
 /* Accessibility */
 .nav-btn:focus,
 .thumbnails-toggle:focus,
-.thumbnail:focus {{
+.thumbnail:focus {
     outline: 3px solid #4CAF50;
     outline-offset: 2px;
-}}
+}
 
 /* Loading Animation */
-@keyframes fadeIn {{
-    from {{
+@keyframes fadeIn {
+    from {
         opacity: 0;
-    }}
-    to {{
+    }
+    to {
         opacity: 1;
-    }}
-}}
-
-/* Fullscreen mode adjustments */
-.presentation-container:fullscreen .slide {{
-    width: 95vw;
-    height: calc(95vw / {avg_aspect:.4f});
-    max-height: 95vh;
-    max-width: calc(95vh * {avg_aspect:.4f});
-}}
+    }
+}
 '''
         
         css_path = os.path.join(self.output_dir, 'style.css')
@@ -1905,9 +1943,8 @@ body {{
                 'width': slide['width'],
                 'height': slide['height'],
                 'shapes_count': len(slide['shapes']),
-                'html_page': 'index.html',  # Главная HTML страница со всеми слайдами
-                'html_anchor': f'#slide-{slide_num}',  # Якорь для навигации к слайду
-                'html_url': f'index.html#slide-{slide_num}'  # Полный URL к слайду
+                'html_page': f'pages/page{slide_num}.html',  # Путь к отдельной странице
+                'html_url': f'pages/page{slide_num}.html'  # Полный URL к странице
             }
             
             # Добавляем информацию о фоновом изображении, если есть
@@ -1927,33 +1964,6 @@ body {{
         print(f"✅ Метаданные сохранены: {metadata_path}")
 
 
-def apply_flipbook_template(output_dir):
-    """Применяет FlipBook шаблон к сконвертированной презентации"""
-    import shutil
-    
-    template_dir = os.path.join(os.path.dirname(__file__), 'template')
-    
-    # Проверяем наличие шаблона
-    if not os.path.exists(template_dir):
-        print(f"❌ Папка шаблона не найдена: {template_dir}")
-        return
-    
-    # Копируем файлы шаблона
-    template_files = ['flipbook.html', 'flipbook.css', 'flipbook.js']
-    
-    for file in template_files:
-        src = os.path.join(template_dir, file)
-        dst = os.path.join(output_dir, file)
-        
-        if os.path.exists(src):
-            shutil.copy2(src, dst)
-            print(f"  ✓ Скопирован: {file}")
-        else:
-            print(f"  ⚠️  Не найден: {file}")
-    
-    print("  ✓ FlipBook шаблон применен успешно!")
-
-
 def main():
     """Главная функция"""
     import sys
@@ -1963,26 +1973,16 @@ def main():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     
     print("=" * 60)
-    print("PPTX to HTML Converter v16.6")
+    print("PPTX to HTML Converter v17.0")
     print("Конвертер презентаций PowerPoint в веб-страницы")
-    print("v16.6: FlipBook - режим журнала с плавными эффектами")
+    print("Каждый слайд сохраняется в отдельный HTML файл")
     print("=" * 60)
     print()
     
     # Парсим аргументы командной строки
-    template_mode = None
     pptx_file = None
     output_dir = None
-    
-    # Проверяем наличие --template флага
     args = sys.argv[1:]
-    if '--template' in args:
-        template_idx = args.index('--template')
-        if template_idx + 1 < len(args):
-            template_mode = args[template_idx + 1]
-            # Удаляем --template и его значение из args
-            args.pop(template_idx)  # удаляем --template
-            args.pop(template_idx)  # удаляем значение
     
     # Получаем путь к файлу
     if len(args) > 0:
@@ -2006,13 +2006,6 @@ def main():
         if not output_dir:
             output_dir = 'pptx_output'
     
-    # Проверяем шаблон
-    if template_mode:
-        print(f"📐 Используется шаблон: {template_mode}")
-        if template_mode not in ['flipbook', 'default']:
-            print(f"⚠️  Неизвестный шаблон '{template_mode}', используется стандартный")
-            template_mode = None
-    
     print()
     print("🚀 Начинаем конвертацию...")
     print()
@@ -2021,28 +2014,15 @@ def main():
         converter = PPTXToHTMLConverter(pptx_file, output_dir)
         converter.convert()
         
-        # Применяем шаблон если указан
-        if template_mode == 'flipbook':
-            print()
-            print("📐 Применяем FlipBook шаблон...")
-            apply_flipbook_template(output_dir)
-        
         print()
         print("=" * 60)
         print("✨ Готово! Презентация успешно конвертирована!")
         print("=" * 60)
         print()
         print("📝 Инструкции:")
-        if template_mode == 'flipbook':
-            print(f"   1. Откройте: {os.path.join(output_dir, 'flipbook.html')}")
-            print("   2. Используйте мышь для перелистывания страниц")
-            print("   3. Нажмите F11 для полноэкранного режима")
-            print("   4. Нажмите 📑 для просмотра миниатюр")
-        else:
-            print(f"   1. Откройте: {os.path.join(output_dir, 'index.html')}")
-            print("   2. Используйте стрелки ← → для навигации")
-            print("   3. Нажмите F11 для полноэкранного режима")
-            print("   4. Нажмите 📑 для просмотра миниатюр")
+        print(f"   1. Откройте: {os.path.join(output_dir, 'index.html')}")
+        print("   2. Выберите страницу из списка или используйте навигацию")
+        print("   3. Каждая страница доступна по отдельной ссылке")
         print()
         
     except Exception as e:
